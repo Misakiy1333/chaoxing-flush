@@ -1,0 +1,36 @@
+{
+  "name": "chaoxing-flush",
+  "version": "1.1.0",
+  "description": "超星学习通全自动刷课程序 - 协议发包实现，本地部署版",
+  "main": "main.js",
+  "author": "854185073@qq.com",
+  "license": "MIT",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "clui-live": "^0.3.4",
+    "crypto-js": "^4.1.1",
+    "https-proxy-agent": "^5.0.1",
+    "node-fetch": "^2.6.12",
+    "open": "^7.4.2",
+    "prompts": "^2.4.2",
+    "socks-proxy-agent": "^7.0.0",
+    "ssh2": "^1.17.0",
+    "tough-cookie": "^4.1.4",
+    "tty-table": "^4.2.3",
+    "ws": "^8.22.0"
+  },
+  "scripts": {
+    "start": "node main.js",
+    "list": "node tools/list-courses.js",
+    "probe": "node tools/probe.js",
+    "unfreeze": "node tools/unfreeze-login.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
+    "postject": "^1.0.0-alpha.6"
+  }
+}

@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>管理后台 · 超星刷课 · 飞飞</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei",system-ui,sans-serif;background:#0f1923;color:#dfe8f0;padding:18px;max-width:1180px;margin:0 auto}
+h1{font-size:20px;color:#4fc3f7}
+a{color:#4fc3f7;text-decoration:none}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.sub{color:#7b93a7;font-size:12px;margin-top:4px}
+.card{background:#16222e;border:1px solid #23384a;border-radius:10px;padding:16px;margin-bottom:14px}
+.card h2{font-size:14px;color:#8fb8d1;margin-bottom:12px;display:flex;align-items:center;gap:10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stat{background:#0f1923;border-radius:9px;padding:12px;text-align:center}
+.stat b{display:block;font-size:21px;color:#4fc3f7}
+.stat span{font-size:11px;color:#7b93a7}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #1b2b39;white-space:nowrap}
+th{color:#7b93a7;font-weight:500;font-size:12px}
+tr:hover td{background:#132030}
+.pill{display:inline-block;border-radius:20px;padding:2px 9px;font-size:11px;border:1px solid #2c4a63}
+.pill.on{color:#a5d6a7;border-color:#2e5c3a}
+.pill.off{color:#90a4ae}
+.pill.warn{color:#ffd54f;border-color:#5c4a1f}
+.pill.bad{color:#ef9a9a;border-color:#5c2b2b}
+button{background:#1e88e5;border:none;color:#fff;border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;font-family:inherit}
+button:hover{filter:brightness(1.12)}
+button:disabled{background:#3b5266;cursor:not-allowed}
+button.ghost{background:transparent;border:1px solid #2c4a63;color:#9fb8ca}
+button.danger{background:#e53935}
+button.mini{padding:4px 10px;font-size:12px}
+input,textarea,select{background:#0f1923;border:1px solid #2c4a63;color:#dfe8f0;border-radius:6px;padding:8px 10px;font-size:13px;width:100%;font-family:inherit}
+textarea{min-height:120px;line-height:1.8}
+label{display:block;font-size:12px;color:#7b93a7;margin-bottom:5px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.f{flex:1;min-width:150px}
+.wl{display:flex;align-items:center;gap:10px;background:#0f1923;border-radius:8px;padding:9px 12px;margin:6px 0}
+.wl .u{flex:1;font-size:14px}
+.msg{font-size:12px;min-height:16px;margin-top:8px}
+.ok{color:#66bb6a}.err{color:#ef5350}.warn{color:#ffca28}
+.foot{margin-top:20px;padding-top:14px;border-top:1px solid #1d2f3f;text-align:center;font-size:12px;color:#5d7488;line-height:1.9}
+.foot b{color:#4fc3f7}
+.hide{display:none!important}
+@media(max-width:700px){body{padding:12px}th,td{padding:7px 5px;font-size:12px}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div>
+    <h1>🛠 管理后台 <span style="font-size:11px;color:#4fc3f7;border:1px solid #2c4a63;border-radius:20px;padding:2px 10px;margin-left:6px">飞飞</span></h1>
+    <div class="sub" id="whoLine">正在校验权限…</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="ghost" id="refreshBtn">刷新</button>
+    <a href="/" class="ghost" style="border:1px solid #2c4a63;border-radius:6px;padding:8px 16px;font-size:13px;color:#9fb8ca">返回前台</a>
+  </div>
+</div>
+
+<div id="deny" class="card hide" style="border-color:#5c2b2b">
+  <h2 style="color:#ef9a9a">没有权限</h2>
+  <div style="font-size:13px;color:#a8c4d8;line-height:2">
+    这个页面只允许管理员账号进入。<br>
+    请先用管理员的超星账号在 <a href="/">前台</a> 登录，再回来打开本页。
+  </div>
+</div>
+
+<div id="main" class="hide">
+
+  <div class="card">
+    <h2>总览</h2>
+    <div class="stats">
+      <div class="stat"><b id="sUsers">-</b><span>账号总数</span></div>
+      <div class="stat"><b id="sRunning">-</b><span>正在刷</span></div>
+      <div class="stat"><b id="sPassed">-</b><span>累计完成视频</span></div>
+      <div class="stat"><b id="sMem">-</b><span>内存 MB</span></div>
+      <div class="stat"><b id="sUp">-</b><span>运行时长</span></div>
+      <div class="stat"><b id="sVer">-</b><span>版本</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>用户 <span style="font-size:11px;color:#7b93a7;font-weight:400">每 5 秒自动刷新</span></h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr><th>账号</th><th>状态</th><th>已完成</th><th>失败</th><th>风控</th><th>在线</th><th>白名单</th><th>最后登录</th><th>操作</th></tr>
+        </thead>
+        <tbody id="userRows"><tr><td colspan="9" style="color:#7b93a7">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>白名单</h2>
+    <div class="row" style="margin-bottom:10px">
+      <div class="f" style="max-width:180px">
+        <label>限制开关</label>
+        <select id="wlEnabled">
+          <option value="0">关闭（谁都能登录）</option>
+          <option value="1">开启（只允许名单内）</option>
+        </select>
+      </div>
+      <div class="f">
+        <label>添加账号</label>
+        <input id="wlInput" placeholder="手机号/学号，多个用逗号隔开">
+      </div>
+      <button id="wlAddBtn">添加</button>
+    </div>
+    <div id="wlList"></div>
+    <div class="msg" id="wlMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>更新公告</h2>
+    <div class="row">
+      <div class="f" style="max-width:200px"><label>标题</label><input id="annTitle" value="更新公告"></div>
+    </div>
+    <div style="margin-top:10px">
+      <label>公告内容（每行一条）</label>
+      <textarea id="annItems" placeholder="每行一条公告内容"></textarea>
+    </div>
+    <div style="margin-top:10px"><button id="annSave">发布公告</button></div>
+    <div class="msg" id="annMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>本地版下载</h2>
+    <div class="row">
+      <div class="f" style="max-width:130px"><label>版本号</label><input id="relVer" placeholder="3.7"></div>
+      <div class="f"><label>蓝奏云分享链接</label><input id="relUrl" placeholder="https://wwang.lanzouv.com/xxxxx"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="f"><label>说明（含提取码，例如：本地版安装包（蓝奏云，提取码 ff666））</label><input id="relNote"></div>
+      <button id="relSave">发布</button>
+    </div>
+    <div class="msg" id="relMsg"></div>
+  </div>
+
+  <div class="foot">
+    <b>超星刷课 · 管理后台</b>　由 <b>飞飞</b> 开发维护<br>
+    联系邮箱 <b>cc040921f@gmail.com</b>
+  </div>
+</div>
+
+<script>
+var D = {};      // 最近一次 overview 数据
+var timer = null;
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ var d=document.createElement("div"); d.textContent=(s==null?"":String(s)); return d.innerHTML; }
+function fmtTime(ms){ if(!ms) return "-"; var d=new Date(ms); return (d.getMonth()+1)+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function fmtDur(sec){ sec=Math.max(0,Math.floor(sec||0)); var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60); return h? h+"h"+m+"m" : m+"m"; }
+function msg(id,t,c){ var e=$(id); if(e){ e.textContent=t||""; e.className="msg "+(c||""); } }
+
+async function api(path, opt){
+  opt = opt || {};
+  var r = await fetch(path, Object.assign({ cache:"no-store" }, opt));
+  if(r.status === 401 || r.status === 403) throw new Error("NOAUTH");
+  return await r.json();
+}
+
+async function load(){
+  try{
+    var j = await api("/api/admin/overview");
+    if(!j.ok) throw new Error(j.error || "加载失败");
+    D = j;
+    $("deny").classList.add("hide");
+    $("main").classList.remove("hide");
+    $("whoLine").textContent = "当前管理员：" + j.me + "　·　管理账号：" + (j.admins||[]).join("、");
+    render();
+  }catch(e){
+    if(e.message === "NOAUTH"){
+      $("deny").classList.remove("hide");
+      $("main").classList.add("hide");
+      $("whoLine").textContent = "未授权的访问";
+    }else{
+      $("whoLine").textContent = "加载失败：" + e.message;
+    }
+  }
+}
+
+function render(){
+  var u = D.users || [];
+  var totalPassed = u.reduce(function(a,x){ return a + (x.passed||0); }, 0);
+  $("sUsers").textContent = u.length;
+  $("sRunning").textContent = (D.runningNow||0) + " / " + (D.maxRunning||0);
+  $("sPassed").textContent = totalPassed;
+  $("sMem").textContent = (D.mem && D.mem.rssMB) || 0;
+  $("sUp").textContent = fmtDur(D.uptimeSec);
+  $("sVer").textContent = "v" + ((D.version && D.version.cloud) || "?");
+
+  var rows = u.sort(function(a,b){ return (b.running?1:0)-(a.running?1:0) || (b.lastLogin||0)-(a.lastLogin||0); }).map(function(x){
+    var riskCls = x.risk === "blocked" ? "bad" : x.risk === "cooling" ? "warn" : x.risk === "warn" ? "warn" : "on";
+    var riskTxt = ({ok:"正常",warn:"有拦截",cooling:"冷却中",blocked:"已停止"})[x.risk] || (x.running ? "正常" : "-");
+    return '<tr>' +
+      '<td>' + esc(x.uname) + '</td>' +
+      '<td>' + (x.running ? '<span class="pill on">运行中</span>' : '<span class="pill off">停止</span>') + '</td>' +
+      '<td>' + (x.passed||0) + '</td>' +
+      '<td>' + (x.failed||0) + '</td>' +
+      '<td>' + (x.running ? '<span class="pill ' + riskCls + '">' + riskTxt + '</span>' : '-') + '</td>' +
+      '<td>' + (x.online ? '✔' : '-') + '</td>' +
+      '<td>' + (x.inWhitelist ? '✔' : '<span style="color:#ef9a9a">✖</span>') + '</td>' +
+      '<td>' + fmtTime(x.lastLogin) + '</td>' +
+      '<td>' +
+        '<button class="ghost mini" data-stop="' + esc(x.uname) + '"' + (x.running ? '' : ' disabled') + '>停止</button> ' +
+        '<button class="ghost mini" data-kick="' + esc(x.uname) + '"' + (x.online ? '' : ' disabled') + '>踢下线</button>' +
+      '</td>' +
+      '</tr>';
+  }).join("");
+  $("userRows").innerHTML = rows || '<tr><td colspan="9" style="color:#7b93a7">还没有账号登录过</td></tr>';
+
+  Array.prototype.forEach.call($("userRows").querySelectorAll("button[data-stop]"), function(b){
+    b.onclick = function(){ action(this.dataset.stop, "stop"); };
+  });
+  Array.prototype.forEach.call($("userRows").querySelectorAll("button[data-kick]"), function(b){
+    b.onclick = function(){ action(this.dataset.kick, "kick"); };
+  });
+
+  // 白名单
+  var w = D.whitelist || { enabled:false, unames:[] };
+  $("wlEnabled").value = w.enabled ? "1" : "0";
+  $("wlList").innerHTML = (w.unames.length ? w.unames : []).map(function(n){
+    return '<div class="wl"><div class="u">' + esc(n) + '</div>' +
+      '<button class="ghost mini" data-rm="' + esc(n) + '">移除</button></div>';
+  }).join("") || '<div style="color:#7b93a7;font-size:12px">名单为空' + (w.enabled ? '（当前开启 → 谁都登录不了）' : '') + '</div>';
+  Array.prototype.forEach.call($("wlList").querySelectorAll("button[data-rm]"), function(b){
+    b.onclick = function(){ wlPost({ remove:[this.dataset.rm] }); };
+  });
+
+  // 公告
+  var a = D.announce || {};
+  $("annTitle").value = a.title || "更新公告";
+  $("annItems").value = (a.items || []).join("\n");
+
+  // 下载
+  var rel = D.release || {};
+  $("relVer").value = rel.version || "";
+  $("relUrl").value = rel.downloadUrl || "";
+  $("relNote").value = rel.note || "";
+}
+
+async function action(uname, act){
+  if(act === "kick" && !confirm("确定把 " + uname + " 踢下线？他需要重新登录。")) return;
+  try{
+    var j = await api("/api/admin/user-action", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ uname: uname, action: act }),
+    });
+    if(!j.ok) throw new Error(j.error||"操作失败");
+    load();
+  }catch(e){ $("whoLine").textContent = "操作失败：" + e.message; }
+}
+
+async function wlPost(body){
+  try{
+    var j = await api("/api/admin/whitelist", {
+      method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body),
+    });
+    if(!j.ok) throw new Error(j.error||"保存失败");
+    msg("wlMsg", "已保存", "ok");
+    load();
+  }catch(e){ msg("wlMsg", "失败：" + e.message, "err"); }
+}
+
+$("wlEnabled").onchange = function(){ wlPost({ enabled: this.value === "1" }); };
+$("wlAddBtn").onclick = function(){
+  var v = $("wlInput").value.trim();
+  if(!v){ msg("wlMsg","请输入账号","err"); return; }
+  var list = v.split(/[,，\s]+/).filter(Boolean);
+  wlPost({ add: list }).then(function(){ $("wlInput").value = ""; });
+};
+
+$("annSave").onclick = async function(){
+  var items = $("annItems").value.split(/\r?\n/).map(function(x){ return x.trim(); }).filter(Boolean);
+  if(!items.length){ msg("annMsg","公告内容不能为空","err"); return; }
+  try{
+    var j = await api("/api/admin/announce", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        id: "manual-" + Date.now(),
+        title: $("annTitle").value.trim() || "更新公告",
+        date: new Date().toISOString().slice(0,10),
+        items: items,
+      }),
+    });
+    if(!j.ok) throw new Error(j.error||"发布失败");
+    msg("annMsg", "已发布（" + items.length + " 条）", "ok");
+    load();
+  }catch(e){ msg("annMsg", "失败：" + e.message, "err"); }
+};
+
+$("relSave").onclick = async function(){
+  var ver = $("relVer").value.trim(), url = $("relUrl").value.trim(), note = $("relNote").value.trim();
+  if(!ver || !url){ msg("relMsg","版本号和链接都要填","err"); return; }
+  if(!/^https?:\/\//.test(url)){ msg("relMsg","链接要以 http:// 或 https:// 开头","err"); return; }
+  try{
+    var j = await api("/api/admin/release", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ version: ver, downloadUrl: url, localFile: "", note: note }),
+    });
+    if(!j.ok) throw new Error(j.error||"发布失败");
+    msg("relMsg", "已发布 v" + ver, "ok");
+    load();
+  }catch(e){ msg("relMsg", "失败：" + e.message, "err"); }
+};
+
+$("refreshBtn").onclick = load;
+
+load();
+timer = setInterval(function(){ if(!document.hidden) load(); }, 5000);
+</script>
+</body>
+</html>
