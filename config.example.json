@@ -1,0 +1,12 @@
+{
+	"uname": "你的手机号",
+	"password": "你的密码",
+	"speed": 2,
+	"test": true,
+	"pick": false,
+	"pickinfos": {},
+	"saveCookie": "",
+	"domain": "https://mooc1-1.chaoxing.com/",
+	"debug": false,
+	"updateUrl": "http://你的服务器地址:8080"
+}

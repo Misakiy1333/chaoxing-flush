@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  chaoxing:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: chaoxing-multi
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      ADMIN_PASSWORD: "改成你自己的管理密码"
+      MAX_RUNNING: "30"
+    volumes:
+      - ./data:/app/data
+      - ../quizbank.json:/app/quizbank.json
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
