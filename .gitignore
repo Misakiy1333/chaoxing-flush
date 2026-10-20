@@ -1,0 +1,38 @@
+# 依赖
+node_modules/
+
+# 本地配置（含账号、加密后的密码、cookie，绝不能提交）
+config.json
+config.bak.json
+config.json.bad
+
+# 运行时数据（用户、白名单、公告、版本、安装包）
+data/
+
+# 构建产物
+dist/
+build/
+*.exe
+*.zip
+sea-prep.blob
+bundle.cjs
+web-page.js
+
+# 日志与临时文件
+*.log
+run.log
+token.txt
+tools/.lanzou-cookie
+verifycode.png
+
+# 环境变量
+.env
+.env.*
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+sea-config.json
