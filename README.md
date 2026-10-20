@@ -188,6 +188,12 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | `node tools/publish-release.js` | 上传安装包并发布版本 |
 | `node tools/set-announce.js` | 发布更新公告 |
 | `node tools/remote-deploy.js` | 通过 SSH 一键部署到服务器 |
+| `node tools/push-github.js` | 推送代码到 GitHub（自动建仓库） |
+| `node tools/push-github-api.js` | 走 GitHub API 提交（`github.com` 被墙时用这个） |
+
+> **国内网络提示**：`github.com` 的 git 协议常被重置，但 `api.github.com` 通常可访问。
+> 如果 `git push` 一直失败，用 `node tools/push-github-api.js 用户名/仓库名`，
+> 它通过 REST API 逐文件提交，不依赖 git 协议。
 
 绝大多数运维脚本需要这两个环境变量：
 
