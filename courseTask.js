@@ -59,6 +59,12 @@ class CourseTask {
             model: this.cfg.llmModel || "",
             maxCalls: this.cfg.llmMaxCalls == null ? 200 : Number(this.cfg.llmMaxCalls),
           },
+          // 云端共享题库：先查它，再问大模型
+          shared: {
+            enabled: !!this.cfg.sharedBankUrl,
+            url: this.cfg.sharedBankUrl || "",
+            key: this.cfg.sharedBankKey || "shared",
+          },
         })
       : null;
     // 弹题和章节测验共用同一个答题源（题库接口/大模型的额度不被重复计）

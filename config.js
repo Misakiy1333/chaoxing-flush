@@ -51,6 +51,9 @@ class Config {
     this.llmApiKey = "";
     this.llmModel = "glm-4-flash";
     this.llmMaxCalls = 200;
+    // 云端共享题库（本地版默认指向云端；服务器自己用 127.0.0.1）
+    this.sharedBankUrl = "";
+    this.sharedBankKey = "shared";
     this._exists = false;
   }
 
@@ -109,6 +112,8 @@ class Config {
       llmApiKey: "",
       llmModel: "glm-4-flash",
       llmMaxCalls: 200,
+      sharedBankUrl: "",
+      sharedBankKey: "shared",
     };
     let raw;
     try {
@@ -155,6 +160,17 @@ class Config {
     }
 
     for (const key in cfg) this[key] = cfg[key];
+
+    // ⚠ 环境变量优先级最高：服务器 .env 里配一次，所有账号共用同一把大模型 key
+    const env = process.env;
+    if (env.LLM_ENABLED === "1" || env.LLM_ENABLED === "true") this.llmEnabled = true;
+    if (env.LLM_ENABLED === "0" || env.LLM_ENABLED === "false") this.llmEnabled = false;
+    if (env.LLM_BASE_URL) this.llmBaseUrl = env.LLM_BASE_URL;
+    if (env.LLM_API_KEY) this.llmApiKey = env.LLM_API_KEY;
+    if (env.LLM_MODEL) this.llmModel = env.LLM_MODEL;
+    if (env.LLM_MAX_CALLS) this.llmMaxCalls = Number(env.LLM_MAX_CALLS) || this.llmMaxCalls;
+    if (env.SHARED_BANK_URL) this.sharedBankUrl = env.SHARED_BANK_URL;
+    if (env.SHARED_BANK_KEY) this.sharedBankKey = env.SHARED_BANK_KEY;
     return this;
   }
 }

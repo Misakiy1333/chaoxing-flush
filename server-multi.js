@@ -53,6 +53,7 @@ function adminAllowed(req, url, uname) {
 
 const DATA_DIR = path.join(__dirname, "data");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
+const BANK_FILE = path.join(DATA_DIR, "bank-shared.json"); // 云端共享题库：所有账号答过的题都汇到这里
 const ANNOUNCE_FILE = path.join(DATA_DIR, "announce.json");
 const RELEASE_FILE = path.join(DATA_DIR, "release.json");
 const RELEASE_DIR = path.join(DATA_DIR, "release");
@@ -60,6 +61,80 @@ const WHITELIST_FILE = path.join(DATA_DIR, "whitelist.json");
 const PAGE_FILE = path.join(__dirname, "web", "multi.html");
 const ADMIN_PAGE_FILE = path.join(__dirname, "web", "admin.html");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+/* ============================ 云端共享题库 ============================ */
+const BANK_KEY = process.env.BANK_KEY || "shared";
+// 全局大模型默认（.env 里配一次，所有账号共用；账号自己配了就以账号为准）
+const GLOBAL_LLM = {
+  enabled: process.env.LLM_ENABLED === "1" || process.env.LLM_ENABLED === "true",
+  baseUrl: process.env.LLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
+  apiKey: process.env.LLM_API_KEY || "",
+  model: process.env.LLM_MODEL || "glm-4-flash",
+  maxCalls: Number(process.env.LLM_MAX_CALLS || 400) || 400,
+};
+let sharedBankCache = null;
+
+function bankKeyOk(req) {
+  const got = String(req.headers["x-bank-key"] || "") || String((req.url.split("?")[1] || "").match(/(?:^|&)key=([^&]*)/) ? decodeURIComponent((req.url.split("?")[1] || "").match(/(?:^|&)key=([^&]*)/)[1]) : "");
+  return got === BANK_KEY;
+}
+
+function loadSharedBank() {
+  if (sharedBankCache) return sharedBankCache;
+  let b = { v: 2, entries: {} };
+  try {
+    const raw = JSON.parse(fs.readFileSync(BANK_FILE, "utf8"));
+    if (raw && raw.entries) b = raw;
+  } catch (e) {}
+  sharedBankCache = b;
+  return b;
+}
+
+let bankSaveTimer = null;
+function saveSharedBankSoon() {
+  if (bankSaveTimer) return;
+  bankSaveTimer = setTimeout(() => {
+    bankSaveTimer = null;
+    try {
+      const b = loadSharedBank();
+      fs.writeFileSync(BANK_FILE + ".tmp", JSON.stringify(b));
+      fs.renameSync(BANK_FILE + ".tmp", BANK_FILE);
+    } catch (e) {
+      console.error("[bank] 落盘失败", e.message);
+    }
+  }, 1500);
+}
+
+/** 合并条目：已确认对错的信息优先保留，猜测只在不冲突时写入 */
+function mergeSharedBank(inc) {
+  const bank = loadSharedBank();
+  bank.entries = bank.entries || {};
+  const rank = (e) => (e && e.correct ? 3 : e && e.guess ? 2 : e && (e.wrong || e.members) ? 1 : 0);
+  let added = 0;
+  let updated = 0;
+  for (const k of Object.keys(inc)) {
+    const e = inc[k];
+    if (!e || !k) continue;
+    const old = bank.entries[k];
+    if (!old) {
+      bank.entries[k] = e;
+      added++;
+      continue;
+    }
+    if (rank(e) > rank(old)) {
+      bank.entries[k] = Object.assign({}, old, e);
+      updated++;
+    } else if (rank(e) === rank(old) && rank(e) >= 2) {
+      // 同等可信：合并 wrong/members，长度取并集
+      const w = new Set([].concat(old.wrong || [], e.wrong || []));
+      const m = new Set([].concat(old.members || [], e.members || []));
+      bank.entries[k] = Object.assign({}, old, e, { wrong: Array.from(w), members: Array.from(m) });
+      updated++;
+    }
+  }
+  saveSharedBankSoon();
+  return { total: Object.keys(bank.entries).length, added, updated };
+}
 if (!fs.existsSync(RELEASE_DIR)) fs.mkdirSync(RELEASE_DIR, { recursive: true });
 
 // ---------- 账号白名单 ----------
@@ -246,14 +321,15 @@ function stateOf(uname) {
       answerRemoteEnabled: rec.answerRemoteEnabled === true,
       answerRemoteUrl: rec.answerRemoteUrl || "",
       hasAnswerRemoteToken: !!rec.answerRemoteToken,
-      llmEnabled: rec.llmEnabled === true,
-      llmBaseUrl: rec.llmBaseUrl || "",
-      llmModel: rec.llmModel || "",
-      llmMaxCalls: rec.llmMaxCalls == null ? 200 : rec.llmMaxCalls,
-      hasLlmKey: !!rec.llmApiKey,
+      llmEnabled: rec.llmEnabled == null ? GLOBAL_LLM.enabled : rec.llmEnabled === true,
+      llmBaseUrl: rec.llmBaseUrl || GLOBAL_LLM.baseUrl,
+      llmModel: rec.llmModel || GLOBAL_LLM.model,
+      llmMaxCalls: rec.llmMaxCalls == null ? GLOBAL_LLM.maxCalls : rec.llmMaxCalls,
+      hasLlmKey: !!(rec.llmApiKey || GLOBAL_LLM.apiKey),
     },
     works: base.works || [],
     answer: base.answer || null,
+    bankTotal: Object.keys(loadSharedBank().entries || {}).length,
     logs: r.logs.slice(-80),
     runningNow: runningCount(),
     maxRunning: MAX_RUNNING,
@@ -288,15 +364,18 @@ async function startTask(uname, courseIds) {
     accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
     accuracyMax: rec.accuracyMax == null ? 90 : rec.accuracyMax,
     workRounds: rec.workRounds == null ? 2 : rec.workRounds,
-    // 在线答题源：题库接口 + 大模型
+    // 在线答题源：题库接口 + 大模型（账号没单独配就用服务器 .env 里的全局 key）
     answerRemoteEnabled: rec.answerRemoteEnabled === true,
     answerRemoteUrl: rec.answerRemoteUrl || "",
     answerRemoteToken: rec.answerRemoteToken || "",
-    llmEnabled: rec.llmEnabled === true,
-    llmBaseUrl: rec.llmBaseUrl || "",
-    llmApiKey: rec.llmApiKey || "",
-    llmModel: rec.llmModel || "",
-    llmMaxCalls: rec.llmMaxCalls == null ? 200 : rec.llmMaxCalls,
+    llmEnabled: rec.llmEnabled == null ? GLOBAL_LLM.enabled : rec.llmEnabled === true,
+    llmBaseUrl: rec.llmBaseUrl || GLOBAL_LLM.baseUrl,
+    llmApiKey: rec.llmApiKey || GLOBAL_LLM.apiKey,
+    llmModel: rec.llmModel || GLOBAL_LLM.model,
+    llmMaxCalls: rec.llmMaxCalls == null ? GLOBAL_LLM.maxCalls : rec.llmMaxCalls,
+    // 云端共享题库：所有账号答过的题汇在一起，答题先查它
+    sharedBankUrl: "http://127.0.0.1:" + PORT,
+    sharedBankKey: BANK_KEY,
     log: (line) => pushLog(uname, line),
   };
 
@@ -420,6 +499,38 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ---------------- 云端共享题库 ----------------
+  // 所有账号答过的题汇到 data/bank-shared.json；答题时先查这里，再问大模型。
+  // 用 x-bank-key 做一道轻门槛（默认 shared，可由 .env 的 BANK_KEY 改）。
+  if (u === "/api/bank") {
+    if (!bankKeyOk(req)) {
+      json({ ok: false, error: "题库密钥不对" }, 401);
+      return;
+    }
+    if (req.method === "GET") {
+      const bank = loadSharedBank();
+      json({ ok: true, total: Object.keys(bank.entries || {}).length, entries: bank.entries || {} });
+      return;
+    }
+    if (req.method === "POST") {
+      readBody(req, 8 * 1024 * 1024)
+        .then((body) => {
+          let p = {};
+          try {
+            p = JSON.parse(body || "{}");
+          } catch (e) {
+            json({ ok: false, error: "不是合法 JSON" }, 400);
+            return;
+          }
+          const inc = p.entries && typeof p.entries === "object" ? p.entries : {};
+          const r = mergeSharedBank(inc);
+          json({ ok: true, total: r.total, added: r.added, updated: r.updated });
+        })
+        .catch(() => json({ ok: false, error: "读取失败" }, 400));
+      return;
+    }
+  }
+
   // 版本与更新公告（公开，不需要登录）
   if (u === "/api/version") {
     json({
@@ -431,6 +542,14 @@ const server = http.createServer((req, res) => {
       announcement: loadAnnounce(),
       localVersion: VERSION.version,
       latest: loadRelease(),
+      // 本地版从这里拿到共享题库地址与密钥，自动接入云端题库
+      bank: {
+        url: (process.env.UPDATE_URL || "").replace(/\/+$/, "") || ("http://127.0.0.1:" + PORT),
+        key: BANK_KEY,
+        total: Object.keys(loadSharedBank().entries || {}).length,
+        llmModel: GLOBAL_LLM.model,
+        llmEnabled: GLOBAL_LLM.enabled,
+      },
     });
     return;
   }

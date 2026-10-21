@@ -513,12 +513,25 @@ function group(title) {
 
   await ta("题库接口 + 大模型都走通，并写回本地题库缓存", async () => {
     const seen = { remote: 0, llm: 0 };
+    const cloudEntries = {};
+    const cloudQ = "云端题库里已经有的题";
+    cloudEntries[A.qkey(cloudQ)] = { type: 0, correct: "C", updatedAt: Date.now() };
     const srv = httpLib.createServer((req, res) => {
       let buf = "";
       req.on("data", (c) => (buf += c));
       req.on("end", () => {
         res.setHeader("Content-Type", "application/json");
-        if (req.url.indexOf("/answer") === 0) {
+        if (req.url.indexOf("/api/bank") === 0 && req.method === "GET") {
+          res.end(JSON.stringify({ ok: true, total: Object.keys(cloudEntries).length, entries: cloudEntries }));
+        } else if (req.url.indexOf("/api/bank") === 0 && req.method === "POST") {
+          const inc = (JSON.parse(buf || "{}").entries) || {};
+          let added = 0;
+          for (const k of Object.keys(inc)) {
+            if (!cloudEntries[k]) added++;
+            cloudEntries[k] = inc[k];
+          }
+          res.end(JSON.stringify({ ok: true, total: Object.keys(cloudEntries).length, added }));
+        } else if (req.url.indexOf("/answer") === 0) {
           seen.remote++;
           res.end(JSON.stringify({ code: 0, question: "C" }));
         } else if (req.url.indexOf("/v1/chat/completions") === 0) {
@@ -587,6 +600,26 @@ function group(title) {
     });
     assert.strictEqual(await prov3.resolve({ type: 0, title: "连不上", options: { A: "甲" } }), null);
 
+    // ---- 云端共享题库：先查它，再问大模型 ----
+    const bank4 = A.emptyBank();
+    const prov4 = new AP.AnswerProvider({
+      bank: bank4,
+      shared: { enabled: true, url: "http://127.0.0.1:" + port, key: "shared" },
+      llm: { enabled: true, baseUrl: "http://127.0.0.1:" + port + "/v1", apiKey: "k", model: "m" },
+    });
+    const beforeLlm = seen.llm;
+    const r4 = await prov4.resolve({ type: 0, title: cloudQ, options: { A: "甲", B: "乙", C: "丙" } });
+    assert.ok(r4 && r4.answer === "C", "云端题库应直接给出 C，实际 " + JSON.stringify(r4));
+    assert.strictEqual(r4.from, "cloud-bank");
+    assert.strictEqual(seen.llm, beforeLlm, "云端题库命中时不该再调大模型");
+    assert.strictEqual(prov4.stats.cloudHit, 1);
+
+    // 答过的题推回云端
+    A.learn(bank4, "一道新学的题", 0, "B", "marking_dui", { A: "甲", B: "乙" }, 1);
+    const pushed = await prov4.pushShared();
+    assert.ok(pushed >= 1, "应至少推送 1 条，实际 " + pushed);
+    assert.ok(cloudEntries[A.qkey("一道新学的题")], "云端应收到新条目");
+
     await new Promise((r) => srv.close(r));
   });
 
@@ -594,11 +627,48 @@ function group(title) {
     const qs = [
       { id: "1", type: 0, answer: "A", confidence: 1, options: { A: "甲", B: "乙" } },
       { id: "2", type: 0, answer: "A", confidence: 0.8, options: { A: "甲", B: "乙" } },
+      { id: "3", type: 1, answer: "AB", confidence: 0.6, options: { A: "甲", B: "乙", C: "丙" } },
     ];
     const p = Acc.plan({ questions: qs, fullScore: 100, min: 80, max: 90, seed: 1 });
-    assert.strictEqual(p.knownCount, 1, "只有置信度 1 的算已知");
+    assert.strictEqual(p.knownCount, 2, "大模型答案(0.8)算已知，多选半截答案(0.6)不算");
     assert.strictEqual(p.unknownCount, 1);
-    assert.strictEqual(p.plan["2"], "A", "低置信度答案仍然照它交");
+    assert.strictEqual(p.plan["3"], "AB", "低置信度答案仍然照它交");
+  });
+
+  await ta("按「落区间概率」选方案，而不是按期望分", async () => {
+    const mk = (i, conf) => ({ id: String(i), type: 0, answer: "A", confidence: conf == null ? 1 : conf, options: { A: "甲", B: "乙", C: "丙", D: "丁" } });
+    const mkU = (i, t) => ({ id: String(i), type: t == null ? 0 : t, answer: null, confidence: 0, guess: "A", options: { A: "甲", B: "乙", C: "丙", D: "丁" } });
+    const go = (qs) => Acc.plan({ questions: qs, fullScore: 100, min: 80, max: 90, seed: 7 });
+
+    // 5 题全已知：只能 80 或 100 → 必须选 80（满分一眼假）
+    const p1 = go([1, 2, 3, 4, 5].map((i) => mk(i)));
+    assert.strictEqual(p1.missed.length, 1);
+    assert.strictEqual(p1.expected, 80);
+    assert.ok(p1.probInRange > 0.99, "全已知应 100% 落区间");
+
+    // 大模型答的也算已知，否则会一路满分
+    const p2 = go([1, 2, 3, 4, 5].map((i) => mk(i, 0.8)));
+    assert.strictEqual(p2.missed.length, 1);
+
+    // 4 已知 + 1 未知（单选 25%）：不压分，靠未知题自然掉分更稳
+    const p3 = go([1, 2, 3, 4].map((i) => mk(i)).concat([mkU(5)]));
+    assert.strictEqual(p3.missed.length, 0);
+    assert.ok(p3.probInRange > 0.7, "4已知1未知 落区间概率 " + p3.probInRange);
+
+    // 2 题（每题 50 分）：80~90 不可达 → 如实标记、概率 0
+    const p4 = go([mk(1), mk(2)]);
+    assert.strictEqual(p4.reachable, false);
+    assert.strictEqual(p4.probInRange, 0);
+
+    // 8 题：每题 12.5 分，压一道刚好 87.5
+    const p5 = go([1, 2, 3, 4, 5, 6, 7, 8].map((i) => mk(i)));
+    assert.strictEqual(p5.missed.length, 1);
+    assert.ok(Math.abs(p5.expected - 87.5) < 0.01, "8题压一道应 87.5，实际 " + p5.expected);
+
+    // 4 题（每题 25 分）：区间不可达，取离区间更近的 75，不要 100
+    const p6 = go([1, 2, 3, 4].map((i) => mk(i)));
+    assert.strictEqual(p6.reachable, false);
+    assert.strictEqual(p6.expected, 75);
   });
 
   /* ---------------------------------------------------- 13. 任务点解析 */

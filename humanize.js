@@ -181,6 +181,15 @@ class Humanizer {
     }
   }
 
+  /** 通用拟人停顿（毫秒）：章节测验/作业里"读题、检查、等成绩"都走这里 */
+  async think(ms, label) {
+    if (!this.enabled || this.stopped) return;
+    const t = Math.max(0, Math.round(ms));
+    if (t < 300) return;
+    if (label) this.log(`   💭 ${label} ${(t / 1000).toFixed(1)} 秒`);
+    await this._sleep(t);
+  }
+
   /** 弹题作答前的思考时间 */
   async beforeQuiz() {
     if (!this.enabled) return;

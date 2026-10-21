@@ -125,6 +125,15 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
 
 <!-- ============ 主界面 ============ -->
 <div id="app" class="hide">
+  <!-- 云端公告：本地版和云端都会收到 -->
+  <div id="noticeBar" class="hide" style="margin:12px 18px 0;padding:10px 14px;border:1px solid #24506b;border-left:3px solid #4aa8e0;border-radius:8px;background:#0d1c26">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <strong id="noticeTitle" style="font-size:13px;color:#bfe4ff">更新公告</strong>
+      <span style="font-size:12px;color:#5f7d92"><span id="noticeDate"></span>
+        <a href="#" id="noticeClose" style="color:#5f7d92;margin-left:10px">收起</a></span>
+    </div>
+    <ul id="noticeItems" style="margin:7px 0 0;padding-left:18px;font-size:12.5px;color:#9fbdd0;line-height:1.7"></ul>
+  </div>
   <header>
     <div class="brand">
       <h1>超星刷课 <span id="roleTag2">·</span></h1>
@@ -210,16 +219,17 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
     </div>
     <div style="font-size:12px;color:#7b93a7;margin-top:9px">
       分数会尽量落在上面这个区间（默认 80%~90%）：会的题故意错几道把总分压下去，不会的题按题型猜对概率折算。
-      设 100/100 就是“能答对的全答对”。
+      设 100/100 就是“能答对的全答对”。题量太少时（每题 25 分以上）区间可能压不进去，会取离区间最近的分数。
     </div>
     <div id="accHint" style="font-size:12px;color:#7b93a7;margin-top:6px"></div>
 
-    <!-- 答题源：本地题库 → 外部题库接口 → 大模型 -->
+    <!-- 答题源：云端题库 → 外部题库接口 → 大模型 -->
     <details style="margin-top:14px;padding-top:12px;border-top:1px solid #1b2b39">
       <summary style="cursor:pointer;font-size:13px;color:#8fb8d1">答题源设置（不会的题问谁）<span id="srcState" style="font-size:12px;color:#7b93a7"></span></summary>
       <div style="font-size:12px;color:#7b93a7;margin:9px 0">
-        顺序：本地题库（免费、答过就记得）→ 外部题库接口 → 大模型。都留空也能用，只是正确率靠猜。
+        顺序：云端共享题库（所有账号答过的题都在里面）→ 外部题库接口 → 大模型。答过的题自动写回云端，越刷越准、越刷越省。
       </div>
+      <div id="bankHint" style="font-size:12px;color:#8fb8d1;margin-bottom:8px"></div>
 
       <div class="row" style="align-items:flex-end">
         <div style="min-width:120px">
@@ -788,8 +798,15 @@ function render(s){
   // 答题源命中情况
   var an = s.answer;
   if($("srcHint") && an){
-    $("srcHint").textContent = "本次运行：题库命中 " + (an.remoteHit||0) + " 题，大模型命中 " + (an.llmHit||0) +
-      " 题（调用 " + (an.llmCalls||0) + " 次，失败 " + (an.failed||0) + "）";
+    $("srcHint").textContent = "本次运行：云端题库命中 " + (an.cloudHit||0) + " 题，外部题库命中 " + (an.remoteHit||0) +
+      " 题，大模型命中 " + (an.llmHit||0) + " 题（调用 " + (an.llmCalls||0) + " 次，失败 " + (an.failed||0) + "）";
+  }
+  if($("bankHint")){
+    var bt = (s.settings && s.settings.bankTotal) || s.bankTotal || 0;
+    var bu = (s.settings && s.settings.sharedBankUrl) || "";
+    $("bankHint").textContent = bu
+      ? ("云端题库：" + (bt ? bt + " 题" : "已连接，暂无条目") + "　（" + bu + "）")
+      : "云端题库：未配置（本地版会在能连上云端时自动接入）";
   }
 
   // 当前播放
@@ -862,6 +879,28 @@ function render(s){
     renderPick();
   }
 }
+
+/* ---------- 云端公告（本地版和云端都从这里拿） ---------- */
+function loadNotice(){
+  fetch("/api/version").then(function(r){ return r.json(); }).then(function(j){
+    var a = (j && j.announcement) || null;
+    if(!a || !a.items || !a.items.length) return;
+    var id = String(a.id || a.date || a.title || "");
+    var seen = "";
+    try{ seen = localStorage.getItem("noticeSeen") || ""; }catch(e){}
+    if(seen === id) return; // 看过的就收着，点开「更新公告」还能看
+    $("noticeTitle").textContent = a.title || "更新公告";
+    $("noticeDate").textContent = a.date || "";
+    $("noticeItems").innerHTML = (a.items || []).map(function(x){ return "<li>" + esc(x) + "</li>"; }).join("");
+    $("noticeBar").classList.remove("hide");
+    $("noticeClose").onclick = function(ev){
+      ev.preventDefault();
+      $("noticeBar").classList.add("hide");
+      try{ localStorage.setItem("noticeSeen", id); }catch(e){}
+    };
+  }).catch(function(){});
+}
+loadNotice();
 </script>
 </body>
 </html>
