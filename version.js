@@ -22,8 +22,9 @@ module.exports = {
     "选课修正：没勾选课程时「开始」按钮不可点",
     "修复：已刷完的整门课整体跳过；已完成章节不再重复建会话",
   ],
-  // 云端更新地址（本地版检查更新用；可在 config.json 里用 updateUrl 覆盖）
-  updateUrl: "", // 换成你自己的服务器地址，例如 "http://1.2.3.4:8080"
+  // 云端更新地址（本地版检查更新用；可在 config.json 里用 updateUrl 覆盖，
+  // 服务器上也可用环境变量 UPDATE_URL 指定，仓库里不写死具体地址）
+  updateUrl: process.env.UPDATE_URL || "",
 
   /**
    * 最新可下载的本地版（蓝奏云分享链接）。
