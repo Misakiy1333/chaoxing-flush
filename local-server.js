@@ -90,6 +90,18 @@ class LocalServer {
       brushStart: this.cfg.brushStart == null ? 0 : Number(this.cfg.brushStart),
       brushEnd: this.cfg.brushEnd == null ? 24 : Number(this.cfg.brushEnd),
       skipCourse: this.cfg.skipCourse || "",
+      accuracyMin: this.cfg.accuracyMin == null ? 80 : Number(this.cfg.accuracyMin),
+      accuracyMax: this.cfg.accuracyMax == null ? 90 : Number(this.cfg.accuracyMax),
+      workEnabled: this.cfg.workEnabled !== false,
+      workRounds: this.cfg.workRounds == null ? 2 : Number(this.cfg.workRounds),
+      answerRemoteEnabled: this.cfg.answerRemoteEnabled === true,
+      answerRemoteUrl: this.cfg.answerRemoteUrl || "",
+      hasAnswerRemoteToken: !!this.cfg.answerRemoteToken,
+      llmEnabled: this.cfg.llmEnabled === true,
+      llmBaseUrl: this.cfg.llmBaseUrl || "",
+      llmModel: this.cfg.llmModel || "",
+      llmMaxCalls: this.cfg.llmMaxCalls == null ? 200 : Number(this.cfg.llmMaxCalls),
+      hasLlmKey: !!this.cfg.llmApiKey,
     };
   }
 
@@ -106,6 +118,8 @@ class LocalServer {
       ui: base.ui || null,
       quiz: base.quiz || (this.task && this.task.quizAgent ? this.task.quizAgent.stats : null) || null,
       courses: base.courses || [],
+      works: base.works || [],
+      answer: base.answer || null,
       risk: base.risk || { level: "ok", blockHits: 0, coolingUntil: 0, coolingLeftMs: 0, lastBlockAt: 0, note: "" },
       time: base.time || null,
       settings: this.settings(),
@@ -155,6 +169,20 @@ class LocalServer {
       speed: 1,
       humanMode: true,
       onlyCourse: Array.isArray(courseIds) && courseIds.length ? courseIds.map(String) : null,
+      // 章节测验/作业 + 正确率区间（设置页可改，默认 80~90）
+      workEnabled: this.cfg.workEnabled !== false,
+      accuracyMin: this.cfg.accuracyMin == null ? 80 : Number(this.cfg.accuracyMin),
+      accuracyMax: this.cfg.accuracyMax == null ? 90 : Number(this.cfg.accuracyMax),
+      workRounds: this.cfg.workRounds == null ? 2 : Number(this.cfg.workRounds),
+      // 在线答题源
+      answerRemoteEnabled: this.cfg.answerRemoteEnabled === true,
+      answerRemoteUrl: this.cfg.answerRemoteUrl || "",
+      answerRemoteToken: this.cfg.answerRemoteToken || "",
+      llmEnabled: this.cfg.llmEnabled === true,
+      llmBaseUrl: this.cfg.llmBaseUrl || "",
+      llmApiKey: this.cfg.llmApiKey || "",
+      llmModel: this.cfg.llmModel || "",
+      llmMaxCalls: this.cfg.llmMaxCalls == null ? 200 : Number(this.cfg.llmMaxCalls),
       log: (l) => this.log(l),
     };
 
@@ -370,6 +398,34 @@ class LocalServer {
         if (p.skipCourse != null) this.cfg.skipCourse = String(p.skipCourse);
         for (const k of ["dailyHours", "brushStart", "brushEnd"]) {
           if (p[k] != null && p[k] !== "" && !isNaN(Number(p[k]))) this.cfg[k] = Number(p[k]);
+        }
+        // 正确率区间（0~100，自动纠正上下限）
+        for (const k of ["accuracyMin", "accuracyMax"]) {
+          if (p[k] != null && p[k] !== "" && !isNaN(Number(p[k]))) {
+            this.cfg[k] = Math.max(0, Math.min(100, Math.round(Number(p[k]))));
+          }
+        }
+        if (Number(this.cfg.accuracyMin) > Number(this.cfg.accuracyMax)) {
+          const t = this.cfg.accuracyMin;
+          this.cfg.accuracyMin = this.cfg.accuracyMax;
+          this.cfg.accuracyMax = t;
+        }
+        if (p.workEnabled != null) this.cfg.workEnabled = !!p.workEnabled;
+        if (p.workRounds != null && !isNaN(Number(p.workRounds))) {
+          this.cfg.workRounds = Math.max(1, Math.min(3, Number(p.workRounds)));
+        }
+        // 在线答题源：题库接口 + 大模型
+        if (p.answerRemoteEnabled != null) this.cfg.answerRemoteEnabled = !!p.answerRemoteEnabled;
+        if (p.answerRemoteUrl != null) this.cfg.answerRemoteUrl = String(p.answerRemoteUrl).trim();
+        if (p.answerRemoteToken === "__CLEAR__") this.cfg.answerRemoteToken = "";
+        else if (p.answerRemoteToken != null && p.answerRemoteToken !== "") this.cfg.answerRemoteToken = String(p.answerRemoteToken).trim();
+        if (p.llmEnabled != null) this.cfg.llmEnabled = !!p.llmEnabled;
+        if (p.llmBaseUrl != null) this.cfg.llmBaseUrl = String(p.llmBaseUrl).trim();
+        if (p.llmModel != null) this.cfg.llmModel = String(p.llmModel).trim();
+        if (p.llmApiKey === "__CLEAR__") this.cfg.llmApiKey = "";
+        else if (p.llmApiKey != null && p.llmApiKey !== "") this.cfg.llmApiKey = String(p.llmApiKey).trim();
+        if (p.llmMaxCalls != null && !isNaN(Number(p.llmMaxCalls))) {
+          this.cfg.llmMaxCalls = Math.max(0, Math.min(2000, Math.round(Number(p.llmMaxCalls))));
         }
         try { await this.cfg.write(); } catch (e) {}
         json({ ok: true, settings: this.settings() });

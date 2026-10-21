@@ -194,6 +194,69 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
       <div style="min-width:100px"><label>结束时段</label><input id="setEnd" type="number" min="1" max="24"></div>
       <button class="ghost" id="saveSet">保存设置</button>
     </div>
+
+    <!-- 章节测验 / 作业 与正确率区间 -->
+    <div class="row" style="margin-top:14px;padding-top:14px;border-top:1px solid #1b2b39;align-items:flex-end">
+      <div style="min-width:120px">
+        <label>自动做章节测验/作业</label>
+        <select id="setWorkOn" style="width:100%;background:#0e1a24;color:#dce7f0;border:1px solid #1b2b39;border-radius:8px;padding:8px">
+          <option value="1">开启（自动交卷）</option>
+          <option value="0">关闭（只刷视频）</option>
+        </select>
+      </div>
+      <div style="min-width:88px"><label>正确率下限 %</label><input id="setAccMin" type="number" min="0" max="100" step="1" value="80"></div>
+      <div style="min-width:88px"><label>正确率上限 %</label><input id="setAccMax" type="number" min="0" max="100" step="1" value="90"></div>
+      <button class="ghost" id="saveSet2">保存正确率</button>
+    </div>
+    <div style="font-size:12px;color:#7b93a7;margin-top:9px">
+      分数会尽量落在上面这个区间（默认 80%~90%）：会的题故意错几道把总分压下去，不会的题按题型猜对概率折算。
+      设 100/100 就是“能答对的全答对”。
+    </div>
+    <div id="accHint" style="font-size:12px;color:#7b93a7;margin-top:6px"></div>
+
+    <!-- 答题源：本地题库 → 外部题库接口 → 大模型 -->
+    <details style="margin-top:14px;padding-top:12px;border-top:1px solid #1b2b39">
+      <summary style="cursor:pointer;font-size:13px;color:#8fb8d1">答题源设置（不会的题问谁）<span id="srcState" style="font-size:12px;color:#7b93a7"></span></summary>
+      <div style="font-size:12px;color:#7b93a7;margin:9px 0">
+        顺序：本地题库（免费、答过就记得）→ 外部题库接口 → 大模型。都留空也能用，只是正确率靠猜。
+      </div>
+
+      <div class="row" style="align-items:flex-end">
+        <div style="min-width:120px">
+          <label>题库接口</label>
+          <select id="setRemoteOn" style="width:100%;background:#0e1a24;color:#dce7f0;border:1px solid #1b2b39;border-radius:8px;padding:8px">
+            <option value="0">关闭</option>
+            <option value="1">开启</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:220px"><label>接口地址（POST，兼容 OCS AnswererWrapper）</label><input id="setRemoteUrl" placeholder="https://example.com/api/answer" autocomplete="off"></div>
+        <div style="min-width:150px"><label>Token（可选）</label><input id="setRemoteToken" type="password" placeholder="留空=不修改" autocomplete="new-password"></div>
+      </div>
+
+      <div class="row" style="align-items:flex-end;margin-top:10px">
+        <div style="min-width:120px">
+          <label>大模型</label>
+          <select id="setLlmOn" style="width:100%;background:#0e1a24;color:#dce7f0;border:1px solid #1b2b39;border-radius:8px;padding:8px">
+            <option value="0">关闭</option>
+            <option value="1">开启</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:220px"><label>BaseURL（OpenAI 兼容）</label><input id="setLlmBase" placeholder="https://api.siliconflow.cn/v1" autocomplete="off"></div>
+        <div style="min-width:180px"><label>模型名</label><input id="setLlmModel" placeholder="Qwen/Qwen2.5-7B-Instruct" autocomplete="off"></div>
+      </div>
+
+      <div class="row" style="align-items:flex-end;margin-top:10px">
+        <div style="flex:1;min-width:240px"><label>API Key</label><input id="setLlmKey" type="password" placeholder="留空=不修改" autocomplete="new-password"></div>
+        <div style="min-width:130px"><label>每次运行最多调用</label><input id="setLlmMax" type="number" min="0" max="2000" step="10" value="200"></div>
+        <button class="ghost" id="saveSet3">保存答题源</button>
+      </div>
+      <div id="srcHint" style="font-size:12px;color:#7b93a7;margin-top:9px"></div>
+    </details>
+
+    <div id="worksBox" class="hide" style="margin-top:12px">
+      <div style="font-size:12px;color:#7b93a7;margin-bottom:6px">最近交卷</div>
+      <div id="worksList"></div>
+    </div>
     <div id="cfgHint" style="font-size:12px;color:#7b93a7;margin-top:9px"></div>
   </div>
 
@@ -400,9 +463,61 @@ function applySettings(me){
   if(s.dailyHours != null) $("setHours").value = s.dailyHours;
   if(s.brushStart != null) $("setStart").value = s.brushStart;
   if(s.brushEnd != null) $("setEnd").value = s.brushEnd;
+  // 章节测验 + 正确率区间（默认 80~90）
+  $("setAccMin").value = s.accuracyMin == null ? 80 : s.accuracyMin;
+  $("setAccMax").value = s.accuracyMax == null ? 90 : s.accuracyMax;
+  $("setWorkOn").value = s.workEnabled === false ? "0" : "1";
+  renderAccHint(s.accuracyMin, s.accuracyMax);
+  renderSrc(s, true);
   skipList = String(s.skipCourse || "")
     .split(/[,，;；\n\r]+/).map(function(x){ return x.trim(); }).filter(Boolean);
   renderCfgHint({ settings: s }); // 拿到设置就立刻显示，不用等状态推送
+}
+
+/** 答题源状态（题库接口 / 大模型）；fill=true 时才回填输入框（避免打字被打断） */
+function renderSrc(s, fill){
+  if(!s) return;
+  if(fill){
+    if($("setRemoteOn")) $("setRemoteOn").value = s.answerRemoteEnabled ? "1" : "0";
+    if($("setRemoteUrl")) $("setRemoteUrl").value = s.answerRemoteUrl || "";
+    if($("setLlmOn")) $("setLlmOn").value = s.llmEnabled ? "1" : "0";
+    if($("setLlmBase")) $("setLlmBase").value = s.llmBaseUrl || "";
+    if($("setLlmModel")) $("setLlmModel").value = s.llmModel || "";
+    if($("setLlmMax")) $("setLlmMax").value = s.llmMaxCalls == null ? 200 : s.llmMaxCalls;
+  }
+  var bits = [];
+  bits.push(s.answerRemoteEnabled ? ("题库接口 已开" + (s.hasAnswerRemoteToken ? "（有Token）" : "")) : "题库接口 关");
+  bits.push(s.llmEnabled ? ("大模型 已开" + (s.hasLlmKey ? "（有Key）" : "（缺Key）")) : "大模型 关");
+  var st = $("srcState");
+  if(st) st.textContent = "　" + bits.join("　·　");
+}
+
+/** 正确率档位提示 */
+function renderAccHint(mn, mx){
+  var el = $("accHint"); if(!el) return;
+  var a = mn == null ? 80 : Number(mn), b = mx == null ? 90 : Number(mx);
+  if(a > b) { var t = a; a = b; b = t; }
+  var txt;
+  if(a === 100 && b === 100) txt = "当前：答对全部会做的题（不做压分）";
+  else if(a === 0 && b === 0) txt = "当前：全部故意答错（不推荐）";
+  else txt = "当前区间：" + a + "% ~ " + b + "%（满分 100 分对应 " + a + "~" + b + " 分）";
+  el.textContent = txt;
+}
+
+/** 最近的交卷记录 */
+function renderWorks(list){
+  var box = $("worksBox"), el = $("worksList");
+  if(!box || !el) return;
+  list = list || [];
+  if(!list.length){ box.classList.add("hide"); return; }
+  box.classList.remove("hide");
+  el.innerHTML = list.slice().reverse().map(function(w){
+    var ratio = w.ratio == null ? "?" : w.ratio + "%";
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid #16242f">' +
+      '<span style="color:#c8d8e4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(w.title || "") + '</span>' +
+      '<span style="color:#4ade80;white-space:nowrap">' + (w.score == null ? "?" : w.score) + "/" + (w.full == null ? 100 : w.full) + " (" + ratio + ')</span>' +
+      '</div>';
+  }).join("");
 }
 async function loadMe(){
   try{
@@ -560,6 +675,48 @@ $("saveSet").onclick = async function(){
   this.disabled=false;
 };
 
+/* 保存正确率区间（独立按钮，改完马上生效） */
+$("saveSet2").onclick = async function(){
+  var a = Number($("setAccMin").value), b = Number($("setAccMax").value);
+  if(isNaN(a) || isNaN(b)){ renderAccHint(null,null); a = 80; b = 90; }
+  if(a > b){ var t=a; a=b; b=t; $("setAccMin").value=a; $("setAccMax").value=b; }
+  this.disabled = true;
+  try{
+    var r = await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ accuracyMin:a, accuracyMax:b, workEnabled: $("setWorkOn").value === "1" })});
+    var j = await r.json();
+    renderAccHint(j && j.settings ? j.settings.accuracyMin : a, j && j.settings ? j.settings.accuracyMax : b);
+    cmsg(j.ok ? ("正确率区间已保存：" + a + "%~" + b + "%（下次启动生效）") : "保存失败", j.ok ? "ok-t" : "err-t");
+  }catch(e){ cmsg("保存失败：" + netHint(),"err-t"); }
+  this.disabled = false;
+};
+
+/* 保存答题源（题库接口 / 大模型） */
+$("saveSet3").onclick = async function(){
+  var body = {
+    answerRemoteEnabled: $("setRemoteOn").value === "1",
+    answerRemoteUrl: $("setRemoteUrl").value.trim(),
+    llmEnabled: $("setLlmOn").value === "1",
+    llmBaseUrl: $("setLlmBase").value.trim(),
+    llmModel: $("setLlmModel").value.trim(),
+    llmMaxCalls: Number($("setLlmMax").value)
+  };
+  var tok = $("setRemoteToken").value.trim();
+  if(tok) body.answerRemoteToken = tok;
+  var key = $("setLlmKey").value.trim();
+  if(key) body.llmApiKey = key;
+  if(body.answerRemoteEnabled && !body.answerRemoteUrl){ cmsg("开了题库接口但没填地址","err-t"); return; }
+  if(body.llmEnabled && (!body.llmBaseUrl || !body.llmModel)){ cmsg("开了大模型但没填 BaseURL/模型名","err-t"); return; }
+  this.disabled = true;
+  try{
+    var r = await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    var j = await r.json();
+    if(j.ok){ renderSrc(j.settings); $("setRemoteToken").value=""; $("setLlmKey").value=""; }
+    cmsg(j.ok ? "答题源已保存（下次启动生效）" : "保存失败", j.ok?"ok-t":"err-t");
+  }catch(e){ cmsg("保存失败：" + netHint(),"err-t"); }
+  this.disabled = false;
+};
+
 /* ---------- 实时连接 ---------- */
 function connect(){
   if(ES){ ES.close(); }
@@ -624,6 +781,15 @@ function render(s){
   syncStartBtn();
   $("stopBtn").disabled = !s.running;
   renderCfgHint(s);
+  // 最近交卷（章节测验/作业）
+  renderWorks(s.works || []);
+  if(s.settings){ renderAccHint(s.settings.accuracyMin, s.settings.accuracyMax); renderSrc(s.settings, false); }
+  // 答题源命中情况
+  var an = s.answer;
+  if($("srcHint") && an){
+    $("srcHint").textContent = "本次运行：题库命中 " + (an.remoteHit||0) + " 题，大模型命中 " + (an.llmHit||0) +
+      " 题（调用 " + (an.llmCalls||0) + " 次，失败 " + (an.failed||0) + "）";
+  }
 
   // 当前播放
   var cur = (s.ui && s.ui.active && s.ui.active[0]) || (s.ui && s.ui.current) || null;

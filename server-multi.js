@@ -239,7 +239,21 @@ function stateOf(uname) {
       brushEnd: rec.brushEnd == null ? 24 : rec.brushEnd,
       parallel: 1,
       skipCourse: rec.skipCourse || "",
+      accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
+      accuracyMax: rec.accuracyMax == null ? 90 : rec.accuracyMax,
+      workEnabled: rec.workEnabled !== false,
+      workRounds: rec.workRounds == null ? 2 : rec.workRounds,
+      answerRemoteEnabled: rec.answerRemoteEnabled === true,
+      answerRemoteUrl: rec.answerRemoteUrl || "",
+      hasAnswerRemoteToken: !!rec.answerRemoteToken,
+      llmEnabled: rec.llmEnabled === true,
+      llmBaseUrl: rec.llmBaseUrl || "",
+      llmModel: rec.llmModel || "",
+      llmMaxCalls: rec.llmMaxCalls == null ? 200 : rec.llmMaxCalls,
+      hasLlmKey: !!rec.llmApiKey,
     },
+    works: base.works || [],
+    answer: base.answer || null,
     logs: r.logs.slice(-80),
     runningNow: runningCount(),
     maxRunning: MAX_RUNNING,
@@ -269,6 +283,20 @@ async function startTask(uname, courseIds) {
     speed: 1,
     humanMode: true,
     onlyCourse: Array.isArray(courseIds) && courseIds.length ? courseIds : null,
+    // 章节测验/作业：自动作答 + 正确率区间（用户在页面上可改）
+    workEnabled: rec.workEnabled !== false,
+    accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
+    accuracyMax: rec.accuracyMax == null ? 90 : rec.accuracyMax,
+    workRounds: rec.workRounds == null ? 2 : rec.workRounds,
+    // 在线答题源：题库接口 + 大模型
+    answerRemoteEnabled: rec.answerRemoteEnabled === true,
+    answerRemoteUrl: rec.answerRemoteUrl || "",
+    answerRemoteToken: rec.answerRemoteToken || "",
+    llmEnabled: rec.llmEnabled === true,
+    llmBaseUrl: rec.llmBaseUrl || "",
+    llmApiKey: rec.llmApiKey || "",
+    llmModel: rec.llmModel || "",
+    llmMaxCalls: rec.llmMaxCalls == null ? 200 : rec.llmMaxCalls,
     log: (line) => pushLog(uname, line),
   };
 
@@ -618,11 +646,68 @@ const server = http.createServer((req, res) => {
       for (const k of ["dailyHours", "brushStart", "brushEnd"]) {
         if (p[k] != null && p[k] !== "" && !isNaN(Number(p[k]))) rec[k] = Number(p[k]);
       }
+      // 正确率区间：0~100，自动纠正上下限反了的输入
+      if (p.accuracyMin != null && p.accuracyMin !== "" && !isNaN(Number(p.accuracyMin))) {
+        rec.accuracyMin = Math.max(0, Math.min(100, Math.round(Number(p.accuracyMin))));
+      }
+      if (p.accuracyMax != null && p.accuracyMax !== "" && !isNaN(Number(p.accuracyMax))) {
+        rec.accuracyMax = Math.max(0, Math.min(100, Math.round(Number(p.accuracyMax))));
+      }
+      if (rec.accuracyMin != null && rec.accuracyMax != null && rec.accuracyMin > rec.accuracyMax) {
+        const t = rec.accuracyMin;
+        rec.accuracyMin = rec.accuracyMax;
+        rec.accuracyMax = t;
+      }
+      if (p.workEnabled != null) rec.workEnabled = !!p.workEnabled;
+      if (p.workRounds != null && !isNaN(Number(p.workRounds))) {
+        rec.workRounds = Math.max(1, Math.min(3, Number(p.workRounds)));
+      }
+      // 在线答题源：题库接口
+      if (p.answerRemoteEnabled != null) rec.answerRemoteEnabled = !!p.answerRemoteEnabled;
+      if (p.answerRemoteUrl != null) rec.answerRemoteUrl = String(p.answerRemoteUrl).trim();
+      if (p.answerRemoteToken != null && p.answerRemoteToken !== "") rec.answerRemoteToken = String(p.answerRemoteToken).trim();
+      if (p.answerRemoteToken === "__CLEAR__") rec.answerRemoteToken = "";
+      // 在线答题源：大模型（key 只进不出）
+      if (p.llmEnabled != null) rec.llmEnabled = !!p.llmEnabled;
+      if (p.llmBaseUrl != null) rec.llmBaseUrl = String(p.llmBaseUrl).trim();
+      if (p.llmModel != null) rec.llmModel = String(p.llmModel).trim();
+      if (p.llmApiKey != null && p.llmApiKey !== "") rec.llmApiKey = String(p.llmApiKey).trim();
+      if (p.llmApiKey === "__CLEAR__") rec.llmApiKey = "";
+      if (p.llmMaxCalls != null && !isNaN(Number(p.llmMaxCalls))) {
+        rec.llmMaxCalls = Math.max(0, Math.min(2000, Math.round(Number(p.llmMaxCalls))));
+      }
       db.users[uname] = rec;
       saveUsers(db);
       json({ ok: true, settings: rec });
     });
     return;
+  }
+
+  // 读设置（页面初始化、以及"正确率"卡片显示用）
+  if (u === "/api/settings" && req.method === "GET") {
+    const rec = db.users[uname] || {};
+    return json({
+      ok: true,
+      settings: {
+        skipCourse: rec.skipCourse || "",
+        dailyHours: rec.dailyHours == null ? 24 : rec.dailyHours,
+        brushStart: rec.brushStart == null ? 0 : rec.brushStart,
+        brushEnd: rec.brushEnd == null ? 24 : rec.brushEnd,
+        accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
+        accuracyMax: rec.accuracyMax == null ? 90 : rec.accuracyMax,
+        workEnabled: rec.workEnabled !== false,
+        workRounds: rec.workRounds == null ? 2 : rec.workRounds,
+        // 答题源：key/token 只回报"有没有配"
+        answerRemoteEnabled: rec.answerRemoteEnabled === true,
+        answerRemoteUrl: rec.answerRemoteUrl || "",
+        hasAnswerRemoteToken: !!rec.answerRemoteToken,
+        llmEnabled: rec.llmEnabled === true,
+        llmBaseUrl: rec.llmBaseUrl || "",
+        llmModel: rec.llmModel || "",
+        llmMaxCalls: rec.llmMaxCalls == null ? 200 : rec.llmMaxCalls,
+        hasLlmKey: !!rec.llmApiKey,
+      },
+    });
   }
 
   // 开始

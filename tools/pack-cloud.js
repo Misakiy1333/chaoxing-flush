@@ -15,8 +15,11 @@ const TGZ = path.join(ROOT, "dist", "chaoxing-cloud.tar.gz");
 const JS = [
   "server-multi.js", "session.js", "loginer.js", "course.js", "courseTask.js",
   "player.js", "logger.js", "quizAgent.js", "crypto-util.js", "config.js", "humanize.js", "version.js",
+  // 章节测验/作业 + 正确率区间 + 在线答题源
+  "answerer.js", "accuracy.js", "workAgent.js", "answerProvider.js",
 ];
-const EXTRA = ["package.json", "package-lock.json", "quizbank.json", "config.example.json"];
+// quizbank.json / workstate.json 是各自机器上的运行状态，不进包（避免覆盖服务器已积累的题库）
+const EXTRA = ["package.json", "package-lock.json", "config.example.json"];
 const DIRS = ["web", "deploy"];
 const DOCS = ["README.md", "DEPLOY.md", "DEPLOY-多人版.md", "IP方案.md", "流量成本说明.md"];
 

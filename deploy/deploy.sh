@@ -112,6 +112,7 @@ if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
       --exclude='_br*' --exclude='_e*.txt' --exclude='_f*.txt' --exclude='_o.txt' \
       --exclude=run.log --exclude='*.exe' --exclude='*.zip' \
       --exclude='./data' --exclude='./logs' --exclude='./backup' --exclude='./.env' \
+      --exclude=quizbank.json --exclude=workstate.json \
       . 2>/dev/null | tar -C "$APP_DIR" -xf -
 fi
 mkdir -p "$APP_DIR/data" "$APP_DIR/logs"

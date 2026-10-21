@@ -70,6 +70,7 @@ function runSuite(name, args) {
   runSuite("跳过/停止 test-skip", [path.join(ROOT, "tools", "test-skip.js")]);
   runSuite("角色渲染 test-role", [path.join(ROOT, "tools", "test-role.js")]);
   runSuite("断点续刷 test-resume", [path.join(ROOT, "tools", "test-resume.js")]);
+  runSuite("章节测验/作业 + 正确率 test-work", [path.join(ROOT, "tools", "test-work.js")]);
 
   console.log("\n=== ③ 线上状态 ===");
   if (!HOST) {

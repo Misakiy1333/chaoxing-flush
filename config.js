@@ -36,6 +36,21 @@ class Config {
     this.debug = false;
     // 云端更新/公告地址：本地版启动时会去这里查新版本和公告（可改成自己的服务器）
     this.updateUrl = require("./version.js").updateUrl || "";
+    // 章节测验/作业自动作答 + 正确率区间（默认 80%~90%，界面上可改）
+    this.workEnabled = true;
+    this.accuracyMin = 80;
+    this.accuracyMax = 90;
+    this.workRounds = 2;
+    // 在线答题源：外部题库接口（兼容 OCS AnswererWrapper）
+    this.answerRemoteEnabled = false;
+    this.answerRemoteUrl = "";
+    this.answerRemoteToken = "";
+    // 在线答题源：大模型（OpenAI 兼容，硅基流动/智谱/DeepSeek/Ollama 都行）
+    this.llmEnabled = false;
+    this.llmBaseUrl = "";
+    this.llmApiKey = "";
+    this.llmModel = "";
+    this.llmMaxCalls = 200;
     this._exists = false;
   }
 
@@ -82,6 +97,18 @@ class Config {
       domain: "https://mooc1-1.chaoxing.com/",
       debug: false,
       updateUrl: require("./version.js").updateUrl || "",
+      workEnabled: true,
+      accuracyMin: 80,
+      accuracyMax: 90,
+      workRounds: 2,
+      answerRemoteEnabled: false,
+      answerRemoteUrl: "",
+      answerRemoteToken: "",
+      llmEnabled: false,
+      llmBaseUrl: "",
+      llmApiKey: "",
+      llmModel: "",
+      llmMaxCalls: 200,
     };
     let raw;
     try {

@@ -8,6 +8,7 @@
  */
 const CourseData = require("./course.js");
 const { isVideoDone } = require("./course.js");
+const WA = require("./workAgent.js");
 const Reporter = require("./logger.js");
 const Player = require("./player.js");
 const Session = require("./session.js");
@@ -32,6 +33,38 @@ class CourseTask {
       quizAgent: this.quizAgent,
       humanizer: this.hz,
     });
+
+    // 章节测验 / 作业（手机端协议，含正确率区间控制）
+    this.workState = WA.loadState();
+    this.workEnabled = this.cfg.workEnabled !== false;
+    this.workAgent = this.workEnabled
+      ? this.cfg.workAgent ||
+        new WA.WorkAgent(session, {
+          bank: this.quizAgent ? this.quizAgent.bank : undefined,
+          accuracyMin: this.cfg.accuracyMin,
+          accuracyMax: this.cfg.accuracyMax,
+          rounds: this.cfg.workRounds,
+          log: (l) => this.log(l),
+          humanizer: this.hz,
+          // 在线答题源：外部题库接口(OCS AnswererWrapper 协议) + 大模型(OpenAI 兼容)
+          remote: {
+            enabled: this.cfg.answerRemoteEnabled === true,
+            url: this.cfg.answerRemoteUrl || "",
+            token: this.cfg.answerRemoteToken || "",
+          },
+          llm: {
+            enabled: this.cfg.llmEnabled === true,
+            baseUrl: this.cfg.llmBaseUrl || "",
+            apiKey: this.cfg.llmApiKey || "",
+            model: this.cfg.llmModel || "",
+            maxCalls: this.cfg.llmMaxCalls == null ? 200 : Number(this.cfg.llmMaxCalls),
+          },
+        })
+      : null;
+    // 弹题和章节测验共用同一个答题源（题库接口/大模型的额度不被重复计）
+    if (this.workAgent && this.workAgent.provider && this.quizAgent) {
+      this.quizAgent.provider = this.workAgent.provider;
+    }
     // 拟人模式下强制单路：同账号并发本身就是强风控特征
     this.parallel = this.hz.enabled
       ? 1
@@ -44,7 +77,8 @@ class CourseTask {
     this.windowNotified = 0;
     this.runStart = 0;
     this.limitReached = false;
-    this.stats = { courses: 0, chapters: 0, videos: 0, passed: 0, failed: 0, skipped: 0, quiz: 0 };
+    this.stats = { courses: 0, chapters: 0, videos: 0, passed: 0, failed: 0, skipped: 0, quiz: 0, works: 0 };
+    this.workScores = []; // [{title, score, full, ratio}]
     this.courseList = [];
     this.failedChapters = [];
     this.active = {}; // workerId -> {course, chapter, video, playingTime, duration, pct}
@@ -73,6 +107,11 @@ class CourseTask {
       ui: this.ui,
       courses: Object.values(this.courseProgress),
       quiz: this.quizAgent ? this.quizAgent.stats : null,
+      works: this.workScores.slice(-12),
+      accuracy: this.workAgent
+        ? { min: this.workAgent.accuracy.min, max: this.workAgent.accuracy.max }
+        : null,
+      answer: this.workAgent && this.workAgent.provider ? this.workAgent.provider.stats : null,
       risk: {
         level: this.risk.blocked ? "blocked" : this.risk.coolingUntil > now ? "cooling" : this.risk.blockHits ? "warn" : "ok",
         blockHits: this.risk.blockHits,
@@ -123,6 +162,79 @@ class CourseTask {
     const list = await CourseData.list(this.s, { courseType: 1 });
     this.courseList = list;
     return list;
+  }
+
+  /** 任务点兼容：旧结构是数组，新结构是 {videos, works} */
+  _videos(j) {
+    return Array.isArray(j) ? j : (j && j.videos) || [];
+  }
+  _works(j) {
+    return Array.isArray(j) ? [] : (j && j.works) || [];
+  }
+  /** 还没处理过的测验/作业 */
+  _pendingWorks(works) {
+    if (!this.workAgent || !works || !works.length) return [];
+    return works.filter((w) => !WA.isWorkDone(this.workState, w.workid));
+  }
+
+  /**
+   * 处理一章里的章节测验 / 作业
+   * 全部交卷 + 按用户设的正确率区间控分，做完把状态记到 workstate.json
+   */
+  async runWorks(course, wid, info, kid, works, chapterLabel) {
+    if (!this.workAgent || !works || !works.length) return;
+    for (const w of works) {
+      if (WA.isWorkDone(this.workState, w.workid)) {
+        this.log(`     [${wid}] ⏭ ${w.title} 已经做过，跳过`);
+        continue;
+      }
+      // 考试/测验类考试绝不碰（挂了就是 0 分，而且一次机会）
+      if (/exam|考试|测试/i.test(String(w.worktype || "") + " " + String(w.title || ""))) {
+        this.log(`     [${wid}] ⏭ 跳过考试类任务点：${w.title}`);
+        continue;
+      }
+      const d = w.defaults || {};
+      const ctx = {
+        courseid: d.courseid || info.courseId,
+        clazzId: d.clazzId || info.clazzId,
+        cpi: d.cpi || info.cpi,
+        knowledgeid: d.knowledgeid || kid,
+        workid: w.workid,
+        workRelationId: "",
+        jobid: w.jobid,
+        enc: w.enc || "",
+        ktoken: d.ktoken || "",
+        userid: d.userid || "",
+        title: w.title + (w.worktype === "workA" ? "（章节测验）" : ""),
+      };
+      this._setCurrent(wid, course, chapterLabel, "测验 " + w.title, 0, 0);
+      try {
+        const r = await this.workAgent.run(ctx, {
+          rounds: this.cfg.workRounds,
+          log: (l) => this.log(l),
+        });
+        this.stats.works = (this.stats.works || 0) + 1;
+        if (r.state === "submitted" || r.state === "done") {
+          WA.markWorkDone(this.workState, w.workid, {
+            score: r.score,
+            full: r.fullScore,
+            ratio: r.ratio,
+            title: w.title,
+          });
+          WA.saveState(this.workState);
+        }
+        if (r.state === "submitted") {
+          this.workScores.push({ title: w.title, score: r.score, full: r.fullScore, ratio: r.ratio });
+        } else if (r.state === "error") {
+          this.log(`     [${wid}] ⚠ ${w.title}: ${r.note}`);
+        }
+      } catch (e) {
+        // 风控/登录失效往上抛，其它错误只记录，别影响整章
+        if (e && (e.expired || e.blocked)) throw e;
+        this.log(`     [${wid}] ✖ ${w.title} 处理失败: ${e.message}`);
+      }
+      await sleep(800 + Math.floor(Math.random() * 800));
+    }
   }
 
   /** 单个 worker：独立会话，循环领取章节任务（同一门课同时只允许 1 路，保证多课齐头并进） */
@@ -183,10 +295,12 @@ class CourseTask {
         // 扫描阶段已经拿到任务点了就直接用，省一次请求
         let preJobs = item.jobs || null;
         if (!preJobs) {
-          try { preJobs = await course.getVideoJobs(kid); } catch (e) { preJobs = null; }
+          try { preJobs = await course.getJobs(kid); } catch (e) { preJobs = null; }
         }
-        if (preJobs && preJobs.length && preJobs.every((jj) => isVideoDone(jj))) {
-          this.log(`     [${wid}] ✔ 整章已完成，跳过（${preJobs.length} 个视频）`);
+        const preVideos = this._videos(preJobs);
+        const preWorks = this._works(preJobs);
+        if (preVideos.length && preVideos.every((jj) => isVideoDone(jj)) && !this._pendingWorks(preWorks).length) {
+          this.log(`     [${wid}] ✔ 整章已完成，跳过（${preVideos.length} 个视频）`);
           this.hz.refund(); // 没实际刷课，不占每小时额度
           continue;
         }
@@ -203,14 +317,27 @@ class CourseTask {
 
         let jobs = [];
         try {
-          jobs = preJobs && preJobs.length ? preJobs : await course.getVideoJobs(kid);
+          jobs = preVideos.length ? preVideos : this._videos(await course.getJobs(kid));
         } catch (e) {
           if (e && (e.expired || e.blocked)) throw e;
           this.log(`     [${wid}] 任务点读取失败: ${e.message}`);
           this.failedChapters.push({ info, kid, title });
           continue;
         }
-        if (!jobs.length) { chapterOk = true; this.hz.refund(); this.log(`     [${wid}] 无视频任务点`); continue; }
+        if (!jobs.length) {
+          this.log(`     [${wid}] 无视频任务点`);
+          // 没有视频但有测验/作业也要做
+          try {
+            const js = this._works(preJobs) .length ? this._works(preJobs) : this._works(await course.getJobs(kid));
+            if (js.length) await this.runWorks(course, wid, info, kid, js, `[${idx}/${total}] ${title}`);
+          } catch (e) {
+            if (e && (e.expired || e.blocked)) throw e;
+            this.log(`     [${wid}] 测验任务读取失败: ${e.message}`);
+          }
+          chapterOk = true;
+          this.hz.refund();
+          continue;
+        }
 
         let jobFail = 0;
         for (const job of jobs) {
@@ -244,6 +371,17 @@ class CourseTask {
           }
         }
         chapterOk = jobFail === 0; // 本章所有视频都过了，才算这章完成
+
+        // 视频刷完 → 接着做本章的章节测验 / 作业（交卷 + 按区间控分）
+        try {
+          const ws2 = this._works(preJobs).length
+            ? this._works(preJobs)
+            : this._works(await course.getJobs(kid));
+          await this.runWorks(course, wid, info, kid, ws2, `[${idx}/${total}] ${title}`);
+        } catch (e) {
+          if (e && (e.expired || e.blocked)) throw e;
+          this.log(`     [${wid}] 测验处理异常: ${e.message}`);
+        }
 
         // 节奏控制：章节之间短停顿（主要间隔由 humanize.beforeChapter 控制）
         const gap = this.cfg.chapterDelay == null ? 1500 : Number(this.cfg.chapterDelay);
@@ -373,14 +511,20 @@ class CourseTask {
           for (let i = 0; i < arr.length; i++) {
             const it = arr[i];
             let jobs = null;
-            try { jobs = await course.getVideoJobs(it.kid); } catch (e) { jobs = null; }
-            if (jobs && jobs.length) {
-              const need = jobs.filter((j) => !isVideoDone(j));
-              if (need.length === 0) { scannedDone++; }
-              else { it.jobs = jobs; arr2.push(it); }
-            } else {
-              it.jobs = jobs || [];
+            try { jobs = await course.getJobs(it.kid); } catch (e) { jobs = null; }
+            if (!jobs) {
+              it.jobs = null;
               arr2.push(it); // 读不到就按"需要刷"处理，后面再确认
+            } else {
+              const vids = this._videos(jobs);
+              const need = vids.filter((j) => !isVideoDone(j));
+              const pendingW = this._pendingWorks(this._works(jobs));
+              if (need.length === 0 && pendingW.length === 0) {
+                scannedDone++;
+              } else {
+                it.jobs = jobs;
+                arr2.push(it);
+              }
             }
             if (this.stopped) break;
             await sleep(gapMin + Math.floor(Math.random() * Math.max(200, gapMin)));
@@ -516,13 +660,16 @@ class CourseTask {
                 let course = courses[it.info.courseId];
                 if (!course) { course = new CourseData(s, it.info); await course.open(); await course.getChapters(); courses[it.info.courseId] = course; }
                 await course.studyChapter(it.kid);
-                const jobs = await course.getVideoJobs(it.kid);
+                const allJobs = await course.getJobs(it.kid);
+                const jobs = this._videos(allJobs);
                 for (const job of jobs) {
                   this.stats.videos++;
                   player.speed = !this.hz.enabled && job.doublespeed && Number(job.doublespeed) >= 1 ? 2 : 1;
                   const r = await player.play(course, job, (pt, dur) => this._setCurrent(wid, course, "[补刷] " + it.title, job.name, pt, dur));
                   if (r.isPassed || r.skipped) this.stats.passed++; else this.stats.skipped++;
                 }
+                // 补刷阶段同样补做章节测验
+                await this.runWorks(course, wid, it.info, it.kid, this._works(allJobs), "[补刷] " + it.title);
               } catch (e) {
                 // 补刷阶段遇到风控必须立刻停，否则又是一轮硬撞
                 if (e && e.blocked) {
@@ -546,6 +693,12 @@ class CourseTask {
     this.log(`  课程: ${this.stats.courses}   章节: ${this.stats.chapters}`);
     this.log(`  视频: ${this.stats.videos}   已完成: ${this.stats.passed}   未完成: ${this.stats.skipped}   失败: ${this.stats.failed}`);
     if (this.quizAgent) this.log(`  弹题: 共 ${this.quizAgent.stats.total} 题，答对 ${this.quizAgent.stats.right}`);
+    if (this.stats.works) {
+      this.log(`  测验/作业: 共处理 ${this.stats.works} 个（目标正确率 ${this.workAgent ? this.workAgent.accuracy.min + "-" + this.workAgent.accuracy.max + "%" : "-"}）`);
+      for (const w of this.workScores) {
+        this.log(`     ${w.title}: ${w.score == null ? "?" : w.score}/${w.full} (${w.ratio == null ? "?" : w.ratio}%)`);
+      }
+    }
     this.log("==========================================");
     return this.stats;
   }
