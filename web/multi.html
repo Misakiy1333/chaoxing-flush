@@ -241,8 +241,8 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
             <option value="1">开启</option>
           </select>
         </div>
-        <div style="flex:1;min-width:220px"><label>BaseURL（OpenAI 兼容）</label><input id="setLlmBase" placeholder="https://api.siliconflow.cn/v1" autocomplete="off"></div>
-        <div style="min-width:180px"><label>模型名</label><input id="setLlmModel" placeholder="Qwen/Qwen2.5-7B-Instruct" autocomplete="off"></div>
+        <div style="flex:1;min-width:220px"><label>BaseURL（OpenAI 兼容）</label><input id="setLlmBase" placeholder="https://open.bigmodel.cn/api/paas/v4" autocomplete="off"></div>
+        <div style="min-width:180px"><label>模型名</label><input id="setLlmModel" placeholder="glm-4-flash" autocomplete="off"></div>
       </div>
 
       <div class="row" style="align-items:flex-end;margin-top:10px">
@@ -250,6 +250,7 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
         <div style="min-width:130px"><label>每次运行最多调用</label><input id="setLlmMax" type="number" min="0" max="2000" step="10" value="200"></div>
         <button class="ghost" id="saveSet3">保存答题源</button>
       </div>
+      <div style="font-size:12px;color:#7b93a7;margin-top:9px">免费可用：智谱 <code>https://open.bigmodel.cn/api/paas/v4</code> + <code>glm-4-flash</code>（注册送，推荐）｜硅基流动 <code>https://api.siliconflow.cn/v1</code> + <code>Qwen/Qwen2.5-72B-Instruct</code>｜DeepSeek <code>https://api.deepseek.com/v1</code> + <code>deepseek-chat</code></div>
       <div id="srcHint" style="font-size:12px;color:#7b93a7;margin-top:9px"></div>
     </details>
 

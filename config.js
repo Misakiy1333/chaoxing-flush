@@ -47,9 +47,9 @@ class Config {
     this.answerRemoteToken = "";
     // 在线答题源：大模型（OpenAI 兼容，硅基流动/智谱/DeepSeek/Ollama 都行）
     this.llmEnabled = false;
-    this.llmBaseUrl = "";
+    this.llmBaseUrl = "https://open.bigmodel.cn/api/paas/v4";
     this.llmApiKey = "";
-    this.llmModel = "";
+    this.llmModel = "glm-4-flash";
     this.llmMaxCalls = 200;
     this._exists = false;
   }
@@ -105,9 +105,9 @@ class Config {
       answerRemoteUrl: "",
       answerRemoteToken: "",
       llmEnabled: false,
-      llmBaseUrl: "",
+      llmBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
       llmApiKey: "",
-      llmModel: "",
+      llmModel: "glm-4-flash",
       llmMaxCalls: 200,
     };
     let raw;
