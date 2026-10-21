@@ -6,9 +6,10 @@ module.exports = {
   // 本地版（exe）
   version: "3.7",
   // 云端版（server-multi）
-  cloudVersion: "1.4",
-  buildAt: "2026-10-20 23:30",
+  cloudVersion: "1.5",
+  buildAt: "2026-10-21 13:10",
   changelog: [
+    "更新不再中断刷课：重启前自动保存进度，重启后自动接着刷",
     "项目已开源：https://github.com/Misakiy1333/chaoxing-flush",
     "新增管理后台：管理员账号登录后，右上角出现「🛠 管理后台」，可看所有账号、停止/踢下线、管理白名单、发公告、发布下载链接",
     "启动先扫描：上线先快速识别哪些章节已经刷完，跳过的不再等节奏、不占每小时额度",
