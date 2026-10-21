@@ -1,60 +1,98 @@
 /**
- * 完全打通！！
- *   answerContent 传选项 name（"A"/"B"），isRight:true 表示答对。
- *   服务端记录 answerContent="A"。answered 字段刷新有延迟但服务端已收。
- * 结论：弹题自动作答 = GET quiz-validation?classid=&objectid=&dtype=Video&eventid=<resourceId>&memberinfo=<mi>&answerContent=<name>
+ * 视频内弹题自动作答（与章节测验共用同一份题库 quizbank.json）
  *
- * 「接入 agent」：接本地 LLM？无外部 key。务实方案：
- *   1) 题库策略：优先常识规则 + 记忆（错过的题记住正确答案）
- *   2) answerContent 尝试 A→若 isRight=false 依次 B/C/D（服务端全收，只是 isRight 标记）
- *   3) isRight=false 不影响弹题放行（msg=通过 status:true）
- * 题目文本 + 选项发给我方 agent 判断 —— 这里做成 agentHook 可插入自定义 API；
- *   默认策略：顺序试探直到 isRight:true（对判断题最多 2 次，选择题最多 4 次）。
+ * 协议结论（已实测）：
+ *   GET quiz-validation?classid=&objectid=&dtype=Video&eventid=<resourceId>&memberinfo=<mi>&answerContent=<选项名>
+ *   → {status:true, isRight:true/false, msg:"通过"}
+ *   isRight=false 也不挡播放，但答对会记进题库，后面章节测验/作业能直接复用。
+ *
+ * 作答策略：
+ *   1) 题库（quizbank.json，与 workAgent 共用）：精确 → 相似度匹配
+ *   2) 常识规则（判断题关键词）
+ *   3) 顺序试探（服务端每题最多返回一次 isRight，试探到对为止）
  */
 const Config = require("./config.js");
 const Session = require("./session.js");
-const fs = require("fs");
-const path = require("path");
+const A = require("./answerer.js");
 
 const PLAYER = "https://mooc1-1.chaoxing.com/ananas/modules/video/index.html?v=2026-0920-1154";
-const BANK = path.join(__dirname, "quizbank.json");
 
-function loadBank() { try { return JSON.parse(fs.readFileSync(BANK, "utf8")); } catch (e) { return {}; } }
-function saveBank(b) { fs.writeFileSync(BANK, JSON.stringify(b, null, 1), "utf8"); }
+/** 弹题题型中文 → 数字 */
+function typeNum(t) {
+  const s = String(t || "");
+  if (s.indexOf("多选") !== -1) return 1;
+  if (s.indexOf("填空") !== -1) return 2;
+  if (s.indexOf("判断") !== -1) return 3;
+  return 0;
+}
+
+function toOptionMap(options) {
+  const m = {};
+  (options || []).forEach((o) => {
+    if (o && o.name) m[String(o.name).toUpperCase()] = String(o.description == null ? "" : o.description).trim();
+  });
+  return m;
+}
 
 class QuizAgent {
   constructor(session, opts) {
     this.s = session;
-    this.hz = (opts && opts.humanizer) || null; // 拟人化：作答前要有思考时间
-    this.bank = loadBank();
+    this.hz = (opts && opts.humanizer) || null;
+    this.bankFile = (opts && opts.bankFile) || A.BANK_FILE;
+    this.bank = (opts && opts.bank) || A.loadBank(this.bankFile);
     this.stats = { total: 0, right: 0, tried: 0 };
+    // 在线答题源（和章节测验共用：题库接口 / 大模型）
+    if (opts && opts.provider) {
+      this.provider = opts.provider;
+    } else {
+      const AP = require("./answerProvider.js");
+      this.provider = new AP.AnswerProvider({
+        bank: this.bank,
+        onSaved: () => this.saveBank(),
+        log: () => {},
+        remote: opts && opts.remote,
+        llm: opts && opts.llm,
+      });
+    }
   }
 
-  /** agent 决策钩子：可替换为任何 LLM API。默认：题库 → 常识关键词 → 顺序试探 */
-  async decide(question, options, qtype) {
-    const key = question.replace(/\s+/g, "").slice(0, 80);
-    if (this.bank[key]) return { answer: this.bank[key], from: "bank" };
+  saveBank() {
+    return A.saveBank(this.bank, this.bankFile);
+  }
 
-    // 常识规则（教育类课程高频题）
-    const q = question;
-    const isJudge = qtype === "判断题";
-    if (isJudge) {
-      if (/必须|应当|严禁|不得|禁止|全部|都要/.test(q) && !/不必须|不应当时|不是都/.test(q)) return { answer: "A", from: "heuristic" };
+  /** agent 决策钩子：题库 → 在线答题源 → 顺序试探 */
+  async decide(question, options, qtype) {
+    const t = typeNum(qtype);
+    const opts = Array.isArray(options) ? toOptionMap(options) : options || {};
+    const hit = A.solve(this.bank, { type: t, title: question, options: opts });
+    if (hit.answer) {
+      // 多选：弹题接口只认单个选项，取第一个
+      const first = String(hit.answer).split("")[0];
+      return { answer: first, from: hit.from };
+    }
+    if (this.provider && this.provider.online) {
+      try {
+        const r = await this.provider.resolve({ type: t, title: question, options: opts });
+        if (r && r.answer) return { answer: String(r.answer).split("")[0], from: r.from };
+      } catch (e) {}
     }
     return { answer: null, from: "explore" };
   }
 
   /** 作答一题（自动试探到 isRight） */
   async answer(courseCtx, quizData) {
-    const d = quizData; // datas[0]
+    const d = quizData;
     const qtype = d.questionType;
     const options = d.options || [];
+    const t = typeNum(qtype);
+    const optMap = toOptionMap(options);
     this.stats.total++;
 
     const dec = await this.decide(d.description, options, qtype);
+    const names = options.map((o) => String(o.name).toUpperCase());
     const order = dec.answer
-      ? [dec.answer, ...options.map(o => o.name).filter(n => n !== dec.answer)]
-      : options.map(o => o.name);
+      ? [dec.answer, ...names.filter((n) => n !== dec.answer)]
+      : names;
 
     // 真人看到题目要读一遍、想一下，秒答是明显的机器特征
     if (this.hz) await this.hz.beforeQuiz();
@@ -73,13 +111,16 @@ class QuizAgent {
         `&answerContent=${encodeURIComponent(name)}`;
       const r = await this.s.get(u, PLAYER);
       let j = null;
-      try { j = JSON.parse(r.text); } catch (e) {}
+      try {
+        j = JSON.parse(r.text);
+      } catch (e) {}
       if (j && j.status) {
         if (j.isRight) {
           this.stats.right++;
-          const key = d.description.replace(/\s+/g, "").slice(0, 80);
-          this.bank[key] = name;
-          saveBank(this.bank);
+          // 学到的正确答案写进共用题库（判断题能直接反推另一半）
+          A.learn(this.bank, d.description, t, name, "marking_dui", optMap, 1);
+          if (t === 3) A.learn(this.bank, d.description, 3, name, "marking_dui", { A: "对", B: "错" }, 1);
+          this.saveBank();
           return { ok: true, right: true, answer: name, msg: j.msg };
         }
         return { ok: true, right: false, answer: name, msg: j.msg };
@@ -91,7 +132,7 @@ class QuizAgent {
 
 module.exports = { QuizAgent, PLAYER };
 
-// 自测
+// 自测（需要 config.json 里的有效 cookie）
 if (require.main === module) {
   (async () => {
     const cfg = await new Config("./config.json").read();
@@ -104,7 +145,10 @@ if (require.main === module) {
         memberinfo: "0000000000000000000000000000000000000000000000",
         description: "2008年北京奥运会有77个国家的总统与总理来到中国参加开幕式。",
         questionType: "判断题",
-        options: [{ name: "A", description: "对" }, { name: "B", description: "错" }],
+        options: [
+          { name: "A", description: "对" },
+          { name: "B", description: "错" },
+        ],
       }
     );
     console.log("agent 作答:", JSON.stringify(r), "统计:", agent.stats);

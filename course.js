@@ -248,6 +248,73 @@ class CourseData {
     return jobs;
   }
 
+  /**
+   * ⑤ 一次扫完一个知识点的全部任务点（视频 + 章节测验/作业）
+   * 只扫一遍 cards，比分别调用省一半请求。
+   * @returns {{videos:Array, works:Array}}
+   */
+  async getJobs(kid) {
+    const videos = [];
+    const works = [];
+    const seenWork = new Set();
+    for (let num = 0; num < 60; num++) {
+      let m;
+      try {
+        m = await this.getCards(kid, num);
+      } catch (e) {
+        break;
+      }
+      if (!m || !m.attachments || !m.attachments.length) break;
+      const defaults = m.defaults || {};
+
+      for (const a of m.attachments) {
+        if (a.type === "video") {
+          videos.push({
+            jobid: a.jobid,
+            objectId: (a.property && a.property.objectid) || a.objectId,
+            otherInfo: a.otherInfo,
+            name: (a.property && a.property.name) || "视频",
+            mid: a.mid || (a.property && a.property.mid) || "",
+            doublespeed: (a.property && a.property.doublespeed) || a.doublespeed || 0,
+            attDuration: a.attDuration,
+            attDurationEnc: a.attDurationEnc,
+            videoFaceCaptureEnc: a.videoFaceCaptureEnc || "",
+            playTime: a.playTime || 0,
+            isPassed: !!a.isPassed,
+            jobCount: a.jobCount,
+            defaults,
+            kid,
+          });
+        } else if (a.type === "workid" || (a.property && a.property.module === "work")) {
+          const p = a.property || {};
+          const workid = p.workid || String(a.jobid || "").replace(/^work-/, "");
+          if (!workid || seenWork.has(workid)) continue;
+          seenWork.add(workid);
+          works.push({
+            jobid: a.jobid,
+            workid,
+            worktype: p.worktype || "", // workA=章节测验
+            title: p.title || "章节测验",
+            enc: a.enc || "",
+            mid: a.mid || p.mid || "",
+            aid: a.aid,
+            otherInfo: a.otherInfo,
+            jobCount: a.jobCount,
+            defaults,
+            kid,
+          });
+        }
+      }
+    }
+    return { videos, works };
+  }
+
+  /** ⑤ 只收集视频任务点（旧接口，保持兼容） */
+  async getVideoJobsOnly(kid) {
+    const j = await this.getJobs(kid);
+    return j.videos;
+  }
+
   /** 拉视频内插题（InteractiveQuiz） */
   async getQuizData(mid) {
     if (!mid) return [];

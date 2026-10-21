@@ -1,0 +1,290 @@
+/**
+ * 答题源链：本地题库 → 外部题库接口（兼容 OCS 的 AnswererWrapper）→ 大模型（OpenAI 兼容）
+ *
+ * 为什么这么设计：
+ *   1) 本地题库（quizbank.json）：免费、零延迟，答过一次就永远记得，命中率随时间上涨
+ *   2) 外部题库接口：一次请求拿答案，最省 token。协议照抄 OCS 的 AnswererWrapper，
+ *      所以任何 OCS 能用的题库服务这里也能用
+ *   3) 大模型：兜底。用 OpenAI 兼容的 /chat/completions，硅基流动、智谱 GLM-4-Flash、
+ *      DeepSeek、本地 Ollama、OpenRouter 免费模型都行——只填 baseUrl / model / key 即可
+ *
+ * 注意：不抓网页版聊天。抓网页既不稳定也违反对方条款；免费额度都在 API 上。
+ */
+const http = require("http");
+const https = require("https");
+const A = require("./answerer.js");
+
+const TYPE_LABEL = { 0: "单选题", 1: "多选题", 2: "填空题", 3: "判断题" };
+
+/** 极简 HTTP 请求（不引第三方依赖，超时可中断） */
+function request(urlStr, opts) {
+  const o = opts || {};
+  return new Promise((resolve, reject) => {
+    let u;
+    try {
+      u = new URL(urlStr);
+    } catch (e) {
+      return reject(new Error("地址不合法：" + urlStr));
+    }
+    const isHttps = u.protocol === "https:";
+    const lib = isHttps ? https : http;
+    const payload = o.body == null ? null : Buffer.from(String(o.body), "utf8");
+    const headers = Object.assign({}, o.headers);
+    if (payload) {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+      headers["Content-Length"] = payload.length;
+    }
+    const req = lib.request(
+      {
+        protocol: u.protocol,
+        hostname: u.hostname,
+        port: u.port || (isHttps ? 443 : 80),
+        path: u.pathname + u.search,
+        method: o.method || (payload ? "POST" : "GET"),
+        headers,
+        timeout: o.timeoutMs || 15000,
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({ status: res.statusCode, text });
+        });
+      }
+    );
+    req.on("timeout", () => {
+      req.destroy(new Error("请求超时"));
+    });
+    req.on("error", reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+/** 题干 + 选项 → 给模型的提示词 */
+function buildPrompt(q) {
+  const type = Number(q.type);
+  const keys = Object.keys(q.options || {}).sort();
+  const lines = [];
+  lines.push("这是一道" + (TYPE_LABEL[type] || "题") + "，请直接给出答案。");
+  lines.push("题目：" + String(q.title || "").trim());
+  if (type === 3) {
+    lines.push("选项：A.对  B.错");
+  } else if (keys.length) {
+    lines.push("选项：");
+    for (const k of keys) lines.push(k + ". " + String(q.options[k] || "").trim());
+  }
+  if (type === 2) {
+    lines.push("这是填空题，请给出应填内容本身（多个空用 | 分隔），不要解释。");
+  } else if (type === 1) {
+    lines.push("这是多选题，可能有多项正确。只输出选项字母，例如 ABD，不要解释。");
+  } else {
+    lines.push("只输出一个选项字母（A/B/C/D），不要解释。");
+  }
+  return lines.join("\n");
+}
+
+/** 从模型回复里抠出选项字母 */
+function parseLlmAnswer(text, q) {
+  const type = Number(q.type);
+  const s = String(text || "").trim();
+  if (!s) return null;
+  if (type === 2) {
+    const m = s.match(/^(?:答案[:：]\s*)?(.+)$/m);
+    return m ? m[1].replace(/[。.]$/, "").trim() : null;
+  }
+  const keys = type === 3 ? ["A", "B"] : Object.keys(q.options || {}).sort();
+  // ① 模型直接答了选项内容（例如"丙"）
+  const byText = A.extractLetters(s, q.options || {});
+  const okText = byText.filter((l) => keys.includes(l));
+  if (okText.length) return type === 1 ? Array.from(new Set(okText)).sort().join("") : okText[0];
+  // ② 回复里含独立字母串（"答案：B"、"选 B，因为…"、"ABD"）
+  const cands = [];
+  const re = /(?:^|[^A-Za-z])([A-Za-z]{1,6})(?![A-Za-z])/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const t = m[1].toUpperCase().split("");
+    if (t.every((c) => keys.includes(c))) cands.push(t.join(""));
+  }
+  if (cands.length) {
+    const first = cands[0];
+    return type === 1 ? Array.from(new Set(first.split(""))).sort().join("") : first[0];
+  }
+  // ③ 判断题口语回答
+  if (type === 3) {
+    const b = A.toBool(s);
+    if (b != null) return A.judgeAnswerToLetter(b, { A: "对", B: "错" });
+  }
+  return null;
+}
+
+class AnswerProvider {
+  /**
+   * @param {Object} opts
+   *   bank       本地题库对象（会写回）
+   *   onSaved    落盘回调
+   *   remote     { enabled, url, token, timeoutMs }  外部题库（OCS AnswererWrapper 协议）
+   *   llm        { enabled, baseUrl, apiKey, model, timeoutMs, maxCalls }
+   *   log        日志
+   */
+  constructor(opts) {
+    const o = opts || {};
+    this.bank = o.bank || A.emptyBank();
+    this.onSaved = o.onSaved || null;
+    this.remote = Object.assign({ enabled: false, url: "", token: "", timeoutMs: 12000 }, o.remote || {});
+    this.llm = Object.assign(
+      {
+        enabled: false,
+        baseUrl: "",
+        apiKey: "",
+        model: "",
+        timeoutMs: 20000,
+        maxCalls: 200, // 每次运行最多调多少次，防烧额度
+      },
+      o.llm || {}
+    );
+    this.log = o.log || (() => {});
+    this.stats = { remoteHit: 0, llmHit: 0, llmCalls: 0, failed: 0, cached: 0 };
+  }
+
+  /** 有没有配置任何在线答题源 */
+  get online() {
+    return !!(this.remote.enabled && this.remote.url) || !!(this.llm.enabled && this.llm.baseUrl && this.llm.model);
+  }
+
+  /**
+   * 在线求解一道题（本地题库由调用方先查）
+   * @returns {Promise<{answer:string, from:string, confidence:number}|null>}
+   */
+  async resolve(q) {
+    if (!q || !q.title) return null;
+    // ① 外部题库
+    if (this.remote.enabled && this.remote.url) {
+      const r = await this._askRemote(q);
+      if (r) {
+        this.stats.remoteHit++;
+        this._remember(q, r, 0.85);
+        return { answer: r, from: "remote-bank", confidence: 0.85 };
+      }
+    }
+    // ② 大模型
+    if (this.llm.enabled && this.llm.baseUrl && this.llm.model) {
+      if (this.stats.llmCalls >= this.llm.maxCalls) {
+        this.log(`     ⚠ 大模型调用已达上限 ${this.llm.maxCalls} 次，本次运行不再调用`);
+        return null;
+      }
+      const r = await this._askLlm(q);
+      if (r) {
+        this.stats.llmHit++;
+        this._remember(q, r, 0.8);
+        return { answer: r, from: "llm", confidence: 0.8 };
+      }
+    }
+    return null;
+  }
+
+  /** 把在线得到的答案记进本地题库（标成"待验证"，等批阅结果纠正） */
+  _remember(q, answer, conf) {
+    try {
+      const e = A.entryOf(this.bank, q.title);
+      e.type = Number(q.type);
+      e.guess = answer;
+      e.guessConf = conf;
+      e.updatedAt = Date.now();
+      if (this.onSaved) this.onSaved();
+    } catch (e) {}
+  }
+
+  /** 外部题库：兼容 OCS AnswererWrapper（POST {title, options, type}） */
+  async _askRemote(q) {
+    const keys = Object.keys(q.options || {}).sort();
+    const body = JSON.stringify({
+      title: String(q.title || "").trim(),
+      options: keys.map((k) => k + "." + String(q.options[k] || "").trim()),
+      type: TYPE_LABEL[Number(q.type)] || "单选题",
+    });
+    const headers = { "Content-Type": "application/json" };
+    if (this.remote.token) headers.Authorization = "Bearer " + this.remote.token;
+    try {
+      const r = await request(this.remote.url, {
+        method: "POST",
+        body,
+        headers,
+        timeoutMs: this.remote.timeoutMs,
+      });
+      if (r.status !== 200) return null;
+      let j = null;
+      try {
+        j = JSON.parse(r.text);
+      } catch (e) {
+        return null;
+      }
+      // 常见返回：{code:1, data:{answer:"A"}} / {code:0, question:"A"} / {answer:"A"}
+      const raw =
+        (j && j.data && (j.data.answer || j.data.答案)) ||
+        (j && (j.answer || j.答案 || j.question)) ||
+        (j && j.data && j.data.data && j.data.data.answer) ||
+        "";
+      const ans = parseLlmAnswer(String(raw), q);
+      if (ans) return ans;
+      if (j && j.code === 0 && j.question) return parseLlmAnswer(String(j.question), q);
+      return null;
+    } catch (e) {
+      this.stats.failed++;
+      return null;
+    }
+  }
+
+  /** 大模型：OpenAI 兼容 /chat/completions */
+  async _askLlm(q) {
+    this.stats.llmCalls++;
+    const base = String(this.llm.baseUrl || "").replace(/\/+$/, "");
+    const url = /\/chat\/completions$/.test(base) ? base : base + "/chat/completions";
+    const body = JSON.stringify({
+      model: this.llm.model,
+      temperature: 0,
+      max_tokens: 200,
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是严谨的答题器，只按题型要求输出答案（选项字母或填空内容），不要解释、不要复述题目。",
+        },
+        { role: "user", content: buildPrompt(q) },
+      ],
+    });
+    try {
+      const r = await request(url, {
+        method: "POST",
+        body,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + this.llm.apiKey,
+        },
+        timeoutMs: this.llm.timeoutMs,
+      });
+      if (r.status !== 200) {
+        this.stats.failed++;
+        if (r.status === 401 || r.status === 403) this.log(`     ⚠ 大模型鉴权失败（检查 key）`);
+        return null;
+      }
+      let j = null;
+      try {
+        j = JSON.parse(r.text);
+      } catch (e) {
+        return null;
+      }
+      const content =
+        (j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "";
+      const ans = parseLlmAnswer(content, q);
+      if (!ans) this.stats.failed++;
+      return ans;
+    } catch (e) {
+      this.stats.failed++;
+      return null;
+    }
+  }
+}
+
+module.exports = { AnswerProvider, buildPrompt, parseLlmAnswer, request, TYPE_LABEL };
