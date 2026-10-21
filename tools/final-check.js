@@ -69,6 +69,7 @@ function runSuite(name, args) {
   runSuite("本地服务 test-local", [path.join(ROOT, "tools", "test-local.js")]);
   runSuite("跳过/停止 test-skip", [path.join(ROOT, "tools", "test-skip.js")]);
   runSuite("角色渲染 test-role", [path.join(ROOT, "tools", "test-role.js")]);
+  runSuite("断点续刷 test-resume", [path.join(ROOT, "tools", "test-resume.js")]);
 
   console.log("\n=== ③ 线上状态 ===");
   if (!HOST) {

@@ -157,6 +157,7 @@ function saveUsers(db) {
 
 // ---------- 运行时状态（内存） ----------
 const runtime = {}; // uname -> { session, task, running, logs, token, sid, sse:Set, startedAt }
+let shuttingDown = false; // 正在重启/关闭：此时中断的任务要保留续刷标记
 
 function rt(uname) {
   if (!runtime[uname]) {
@@ -304,6 +305,23 @@ async function startTask(uname, courseIds) {
   r.logs = [];
   pushLog(uname, "▶ 收到启动指令");
 
+  // 记录续刷参数：服务重启（更新代码）后能自动接着刷
+  try {
+    const d = loadUsers();
+    if (d.users[uname]) {
+      d.users[uname].autoResume = true;
+      d.users[uname].runParams = {
+        courseIds: Array.isArray(courseIds) && courseIds.length ? courseIds.map(String) : null,
+        skipCourse: cfg.skipCourse,
+        dailyHours: cfg.dailyHours,
+        brushStart: cfg.brushStart,
+        brushEnd: cfg.brushEnd,
+        startedAt: r.startedAt,
+      };
+      saveUsers(d);
+    }
+  } catch (e) {}
+
   task.run()
     .then(() => pushLog(uname, "任务结束"))
     .catch((e) => pushLog(uname, "异常: " + (e && e.message ? e.message : e)))
@@ -318,7 +336,14 @@ async function startTask(uname, courseIds) {
             try { return { stats: task.stats, ui: task.ui, courses: Object.values(task.courseProgress || {}), risk: task.risk, time: { usedMs: Date.now() - (r.startedAt || Date.now()) } }; }
             catch (e) { return null; }
           }();
-          if (s) { d3.users[uname].lastState = s; saveUsers(d3); }
+          if (s) d3.users[uname].lastState = s;
+          // 正常结束 / 手动停止 → 不再自动续刷；
+          // 因重启中断 → 保留标记；续刷后 1 分钟内又挂了（多半是登录态问题）也保留，等下次重启再试
+          const ranMs = Date.now() - (r.startedAt || Date.now());
+          const keep = shuttingDown || (r.startedByResume && ranMs < 60000);
+          if (!keep) delete d3.users[uname].autoResume;
+          r.startedByResume = false;
+          saveUsers(d3);
         }
       } catch (e) {}
     });
@@ -619,6 +644,11 @@ const server = http.createServer((req, res) => {
     let forced = false;
     if (r.task && r.task.stop) { r.task.stop(); forced = true; }
     if (r.running) { r.running = false; forced = true; } // 立刻反映到界面，不等收尾
+    // 用户主动停止 = 不要自动续刷
+    try {
+      const d = loadUsers();
+      if (d.users[uname]) { delete d.users[uname].autoResume; saveUsers(d); }
+    } catch (e) {}
     pushLog(uname, forced ? "⏹ 已强制停止，进度已保存，下次接着刷" : "当前没有运行中的任务");
     json({ ok: true, forced });
     return;
@@ -834,7 +864,84 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log("  同时刷课上限: " + MAX_RUNNING + " 人");
   console.log("  管理员密码: " + (ADMIN_PASSWORD ? "已设置" : "未设置（无法查看用户列表）"));
   console.log("  访问地址: http://服务器IP:" + PORT);
+  console.log("  断点续刷: " + (autoResumeEnabled() ? "已开启" : "已关闭"));
   console.log("  联系邮箱: cc040921f@gmail.com");
   console.log("========================================");
   console.log("");
+
+  // 服务启动（含更新后重启）→ 自动接着刷上次中断的任务
+  autoResumeAll();
 });
+
+// ---------- 断点续刷 ----------
+function autoResumeEnabled() {
+  return String(process.env.AUTO_RESUME || "1") !== "0";
+}
+
+/** 把运行中的任务状态立刻写盘（重启前调用） */
+function flushState(uname) {
+  const r = runtime[uname];
+  if (!r || !r.task) return;
+  try {
+    const d = loadUsers();
+    if (!d.users[uname]) return;
+    const t = r.task;
+    d.users[uname].lastState = {
+      stats: t.stats,
+      ui: t.ui,
+      courses: Object.values(t.courseProgress || {}),
+      risk: t.risk,
+      time: { usedMs: Date.now() - (r.startedAt || Date.now()) },
+    };
+    saveUsers(d);
+  } catch (e) {}
+}
+
+/** 启动后把上次没刷完的任务重新拉起来 */
+function autoResumeAll() {
+  if (!autoResumeEnabled()) return;
+  let list = [];
+  try {
+    const db = loadUsers();
+    list = Object.values(db.users).filter((x) => x && x.autoResume && x.uname);
+  } catch (e) { return; }
+  if (!list.length) return;
+
+  console.log("[续刷] 发现 " + list.length + " 个未完成的任务，开始自动续刷");
+  list.forEach((rec, i) => {
+    const uname = rec.uname;
+    const p = rec.runParams || {};
+    setTimeout(async () => {
+      try {
+        if (!rec.cookie && !rec.encPassword) {
+          pushLog(uname, "⏸ 上次的任务没能续刷：登录态已失效，请重新登录后再点开始");
+          return;
+        }
+        await startTask(uname, Array.isArray(p.courseIds) && p.courseIds.length ? p.courseIds : null);
+        runtime[uname].startedByResume = true;
+        pushLog(uname, "🔄 服务已重启完成，自动接着上次的进度继续刷");
+        console.log("[续刷] " + uname + " 已自动续刷");
+      } catch (e) {
+        pushLog(uname, "⏸ 自动续刷失败：" + (e && e.message ? e.message : e) + "（可手动点开始）");
+        console.log("[续刷] " + uname + " 失败: " + (e && e.message ? e.message : e));
+      }
+    }, 3000 + i * 4000);
+  });
+}
+
+/** 收到重启/关闭信号：保存进度、停任务，保留续刷标记 */
+function gracefulShutdown(sig) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log("[" + sig + "] 正在保存进度并停止任务…");
+  for (const uname of Object.keys(runtime)) {
+    flushState(uname);
+    try {
+      const r = runtime[uname];
+      if (r && r.task && r.task.stop) r.task.stop();
+    } catch (e) {}
+  }
+  setTimeout(() => process.exit(0), 1200);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
