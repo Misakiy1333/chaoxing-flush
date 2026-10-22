@@ -365,6 +365,70 @@ details[open] summary{color:var(--acc)}
 .sep{margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft)}
 .note{font-size:12px;color:var(--txt-faint);margin-top:11px;line-height:1.95}
 
+/* ===================== 自动答题区块（醒目） ===================== */
+.work-block{
+  margin-top:18px;padding:16px 17px;border-radius:var(--r-md);
+  background:
+    linear-gradient(180deg,rgba(255,194,71,.055),rgba(255,194,71,0) 55%),
+    var(--surface-2);
+  border:1px solid rgba(255,194,71,.28);
+  box-shadow:0 0 0 1px rgba(255,194,71,.06),0 8px 26px -16px rgba(0,0,0,.9);
+  transition:border-color .25s,box-shadow .25s;
+}
+.work-block:hover{border-color:rgba(255,194,71,.45)}
+/* 开启时整块转为正常的蓝色调，一眼能看出状态变化 */
+.work-block.on{
+  background:
+    linear-gradient(180deg,rgba(94,200,255,.07),rgba(94,200,255,0) 55%),
+    var(--surface-2);
+  border-color:rgba(94,200,255,.45);
+  box-shadow:0 0 0 1px rgba(94,200,255,.1),0 10px 30px -16px var(--acc-glow);
+}
+.work-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.work-title{
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  font-size:14px;font-weight:600;color:var(--txt);letter-spacing:.2px;
+}
+.work-icon{font-size:16px;line-height:1}
+.work-badge{
+  font-size:10.5px;font-weight:700;letter-spacing:.5px;padding:3px 9px;border-radius:20px;
+  color:#ffd68a;background:rgba(255,194,71,.14);border:1px solid rgba(255,194,71,.4);
+}
+.work-block.on .work-badge{color:#9fdcff;background:rgba(94,200,255,.14);border-color:rgba(94,200,255,.42)}
+
+/* 开关 */
+.switch{display:inline-flex;align-items:center;cursor:pointer;flex:none}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch-track{
+  width:48px;height:26px;border-radius:20px;display:block;position:relative;
+  background:#22323f;border:1px solid var(--line-hi);transition:.22s;
+}
+.switch-thumb{
+  position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+  background:#7e94a5;transition:.22s cubic-bezier(.4,0,.2,1);
+}
+.switch input:checked + .switch-track{
+  background:linear-gradient(90deg,var(--acc-deep),var(--acc));
+  border-color:rgba(94,200,255,.6);box-shadow:0 0 16px -4px var(--acc-glow);
+}
+.switch input:checked + .switch-track .switch-thumb{
+  left:24px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);
+}
+
+/* 警告说明 */
+.work-warn{
+  margin-top:13px;padding:12px 14px;border-radius:var(--r-sm);
+  background:rgba(255,92,92,.07);border-left:3px solid rgba(255,140,80,.75);
+  font-size:12.5px;line-height:1.95;color:#c9a68a;
+}
+.work-warn b{color:#ffb08a}
+.work-warn > b{display:block;margin-bottom:5px;font-size:13px;color:#ffb88c}
+.work-warn div b{color:#ffd0a8;font-weight:700}
+
+/* 关闭时把参数藏起来，减少误操作 */
+.work-body{margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)}
+.work-block:not(.on) .work-body{display:none}
+
 /* ===================== 课程选择项 ===================== */
 .pick input[type=checkbox]{
   accent-color:var(--acc-deep);cursor:pointer;
@@ -515,24 +579,45 @@ details[open] summary{color:var(--acc)}
       <button class="ghost" id="saveSet">保存设置</button>
     </div>
 
-    <!-- 章节测验 / 作业 与正确率区间 -->
-    <div class="row sep">
-      <div style="min-width:130px">
-        <label>自动做章节测验 / 作业</label>
-        <select id="setWorkOn">
-          <option value="1">开启（自动交卷）</option>
-          <option value="0">关闭（只刷视频）</option>
-        </select>
+    <!-- 章节测验 / 作业 与正确率区间：默认关闭，单独做成醒目区块 -->
+    <div class="work-block" id="workBlock">
+      <div class="work-head">
+        <div class="work-title">
+          <span class="work-icon">📝</span>
+          <span>自动做章节测验 / 作业</span>
+          <span class="work-badge" id="workBadge">默认关闭</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setWorkOn">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
       </div>
-      <div style="min-width:92px"><label>正确率下限 %</label><input id="setAccMin" type="number" min="0" max="100" step="1" value="80"></div>
-      <div style="min-width:92px"><label>正确率上限 %</label><input id="setAccMax" type="number" min="0" max="100" step="1" value="100"></div>
-      <button class="ghost" id="saveSet2">保存正确率</button>
+
+      <div class="work-warn">
+        <b>⚠ 请注意：答案正确率并不高</b>
+        <div>
+          题库和模型都能帮忙，但实际分数通常只有 <b>三到五成</b>。原因有三个：
+          <br>· 每所学校的题目都不一样，网上找不到对应的题库
+          <br>· 模型只能按通用常识推断，遇到本校自编题基本靠猜
+          <br>· 做错会留下记录，可能拉低平时分
+          <br>因此<b>默认关闭</b>。确认要开再打开上面的开关。
+        </div>
+      </div>
+
+      <div class="work-body" id="workBody">
+        <div class="row">
+          <div style="min-width:96px"><label>正确率下限 %</label><input id="setAccMin" type="number" min="0" max="100" step="1" value="80"></div>
+          <div style="min-width:96px"><label>正确率上限 %</label><input id="setAccMax" type="number" min="0" max="100" step="1" value="100"></div>
+          <button class="ghost" id="saveSet2">保存</button>
+        </div>
+        <div class="note">
+          分数会尽量落在上面这个区间：会的题故意错几道把总分压下去，不会的题按题型猜对概率折算。
+          设 100/100 就是“能答对的全答对”。题量太少时（每题 25 分以上）区间可能压不进去，会取离区间最近的分数。
+          <br><b style="color:var(--warn)">区间只是“尽量”，不是保证 —— 真实正确率取决于题目认不认识。</b>
+        </div>
+        <div id="accHint" class="note"></div>
+      </div>
     </div>
-    <div class="note">
-      分数会尽量落在上面这个区间（默认 80%~100%）：会的题故意错几道把总分压下去，不会的题按题型猜对概率折算。
-      设 100/100 就是“能答对的全答对”。题量太少时（每题 25 分以上）区间可能压不进去，会取离区间最近的分数。
-    </div>
-    <div id="accHint" class="note"></div>
 
     <!-- 答题源：云端题库 → 外部题库接口 → 大模型 -->
     <details>
@@ -795,7 +880,9 @@ function applySettings(me){
   // 章节测验 + 正确率区间（默认 80~100）
   $("setAccMin").value = s.accuracyMin == null ? 80 : s.accuracyMin;
   $("setAccMax").value = s.accuracyMax == null ? 100 : s.accuracyMax;
-  $("setWorkOn").value = s.workEnabled === false ? "0" : "1";
+  // 自动答题默认关闭：只有明确 workEnabled === true 才算开
+  $("setWorkOn").checked = (s.workEnabled === true);
+  syncWorkBlock();
   renderAccHint(s.accuracyMin, s.accuracyMax);
   renderSrc(s, true);
   skipList = String(s.skipCourse || "")
@@ -1004,15 +1091,40 @@ $("saveSet").onclick = async function(){
   this.disabled=false;
 };
 
+/* 自动答题开关的状态同步：整块配色 + 角标文案 */
+function syncWorkBlock(){
+  var on = $("setWorkOn").checked;
+  var blk = $("workBlock");
+  if(blk) blk.classList.toggle("on", on);
+  var badge = $("workBadge");
+  if(badge) badge.textContent = on ? "已开启" : "默认关闭";
+}
+/* 拨开关立即生效，不用再点保存 */
+$("setWorkOn").addEventListener("change", async function(){
+  syncWorkBlock();
+  var on = this.checked;
+  if(on && !confirm("确定开启自动答题吗？\n\n答案正确率通常只有三到五成，做错会留下记录并影响平时分。")){
+    this.checked = false;
+    syncWorkBlock();
+    return;
+  }
+  try{
+    var r = await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ workEnabled: on })});
+    var j = await r.json();
+    cmsg(j.ok ? (on ? "已开启自动答题（下次启动生效）" : "已关闭自动答题") : "保存失败", j.ok ? "ok-t" : "err-t");
+  }catch(e){ cmsg("保存失败：" + netHint(),"err-t"); this.checked = !on; syncWorkBlock(); }
+});
+
 /* 保存正确率区间（独立按钮，改完马上生效） */
 $("saveSet2").onclick = async function(){
   var a = Number($("setAccMin").value), b = Number($("setAccMax").value);
-  if(isNaN(a) || isNaN(b)){ renderAccHint(null,null); a = 80; b = 90; }
+  if(isNaN(a) || isNaN(b)){ renderAccHint(null,null); a = 80; b = 100; }
   if(a > b){ var t=a; a=b; b=t; $("setAccMin").value=a; $("setAccMax").value=b; }
   this.disabled = true;
   try{
     var r = await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ accuracyMin:a, accuracyMax:b, workEnabled: $("setWorkOn").value === "1" })});
+      body:JSON.stringify({ accuracyMin:a, accuracyMax:b })});
     var j = await r.json();
     renderAccHint(j && j.settings ? j.settings.accuracyMin : a, j && j.settings ? j.settings.accuracyMax : b);
     cmsg(j.ok ? ("正确率区间已保存：" + a + "%~" + b + "%（下次启动生效）") : "保存失败", j.ok ? "ok-t" : "err-t");

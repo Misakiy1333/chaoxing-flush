@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 本地版服务端（单用户）
  *
  * 提供和云端版**完全一致**的 /api/* 接口，前端共用 web/multi.html，
@@ -43,6 +43,9 @@ class LocalServer {
     this.logs = [];
     this.sse = new Set();
     this.lastState = null;
+    this._cloud = null;        // 云端 /api/version 缓存（题库、公告、最新版都从这拿）
+    this._cloudAt = 0;         // 上次拉取时间
+    this._cloudTried = false;  // 是否已经尝试过拉云端（避免每次请求都卡 3 秒）
   }
 
   async init() {
@@ -97,7 +100,7 @@ class LocalServer {
       skipCourse: this.cfg.skipCourse || "",
       accuracyMin: this.cfg.accuracyMin == null ? 80 : Number(this.cfg.accuracyMin),
       accuracyMax: this.cfg.accuracyMax == null ? 100 : Number(this.cfg.accuracyMax),
-      workEnabled: this.cfg.workEnabled !== false,
+      workEnabled: this.cfg.workEnabled === true,
       workRounds: this.cfg.workRounds == null ? 2 : Number(this.cfg.workRounds),
       answerRemoteEnabled: this.cfg.answerRemoteEnabled === true,
       answerRemoteUrl: this.cfg.answerRemoteUrl || "",
@@ -178,7 +181,7 @@ class LocalServer {
       humanMode: true,
       onlyCourse: Array.isArray(courseIds) && courseIds.length ? courseIds.map(String) : null,
       // 章节测验/作业 + 正确率区间（设置页可改，默认 80~100）
-      workEnabled: this.cfg.workEnabled !== false,
+      workEnabled: this.cfg.workEnabled === true,
       accuracyMin: this.cfg.accuracyMin == null ? 80 : Number(this.cfg.accuracyMin),
       accuracyMax: this.cfg.accuracyMax == null ? 100 : Number(this.cfg.accuracyMax),
       workRounds: this.cfg.workRounds == null ? 2 : Number(this.cfg.workRounds),
@@ -309,54 +312,64 @@ class LocalServer {
       return;
     }
 
-    // 版本与更新公告（公开；立即返回，不等云端）
+    // 版本与更新公告（公开）
+    // 以前是「先返回、云端信息后台再拉」，导致第一次打开页面拿到的是本地
+    // changelog 而不是云端发的公告，刷新一次才看得到。现在首次请求最多等 3 秒
+    // 把云端公告取回来，宁可慢一点也要一次就显示对。
     if (u === "/api/version") {
-      if (!this._cloudAt) this.cloudInfo().catch(() => {});
-      const cloud = this._cloud || null;
-      const latest = (cloud && cloud.latest) || VERSION.latest || {};
-      const latestVer = String(latest.version || VERSION.version);
-      const newer = isNewer(latestVer, VERSION.version);
-      // 下载走云端 /download 中转：蓝奏云链接换了，本地版不用跟着改
-      const base = String((this.cfg && this.cfg.updateUrl) || VERSION.updateUrl || "").replace(/\/+$/, "");
-      const downloadUrl = base ? base + "/download" : String(latest.downloadUrl || "");
-      json({
-        ok: true,
-        role: "local",
-        version: VERSION.version,
-        buildAt: VERSION.buildAt,
-        changelog: VERSION.changelog,
-        announcement: (cloud && cloud.announcement) || {
-          id: VERSION.buildAt + "-local",
-          title: "更新公告",
-          date: VERSION.buildAt,
-          items: VERSION.changelog,
-        },
-        latest: {
-          version: latestVer,
-          downloadUrl,
-          note: String(latest.note || ""),
-        },
-        updateUrl: base,
-        newer,
-        // 云端共享题库（本地版答题先查它，再问大模型）
-        bank: {
-          url: base,
-          key: (cloud && cloud.bank && cloud.bank.key) || this.cfg.sharedBankKey || "shared",
-          total: (cloud && cloud.bank && cloud.bank.total) || 0,
-          enabled: !!base,
-          // 本地版有没有配大模型（看本机配置，不是云端的）
-          llmEnabled: !!(this.cfg.llmEnabled === true && this.cfg.llmApiKey),
-          llmModel: (this.cfg.llmEnabled === true && this.cfg.llmApiKey) ? (this.cfg.llmModel || "") : "",
-        },
-        cloud: cloud
-          ? {
-              version: cloud.version,
-              latestLocal: latestVer,
-              newer,
-              reachable: true,
-            }
-          : { reachable: false },
-      });
+      const handle = () => {
+        const cloud = this._cloud || null;
+        const latest = (cloud && cloud.latest) || VERSION.latest || {};
+        const latestVer = String(latest.version || VERSION.version);
+        const newer = isNewer(latestVer, VERSION.version);
+        // 下载走云端 /download 中转：蓝奏云链接换了，本地版不用跟着改
+        const base = String((this.cfg && this.cfg.updateUrl) || VERSION.updateUrl || "").replace(/\/+$/, "");
+        const downloadUrl = base ? base + "/download" : String(latest.downloadUrl || "");
+        const ann = (cloud && cloud.announcement) || null;
+        json({
+          ok: true,
+          role: "local",
+          version: VERSION.version,
+          buildAt: VERSION.buildAt,
+          changelog: VERSION.changelog,
+          // 云端发过公告就用云端的；没发过（或连不上云端）才退回本版更新日志
+          announcement: (ann && ann.items && ann.items.length) ? ann : {
+            id: VERSION.buildAt + "-local",
+            title: "更新公告",
+            date: VERSION.buildAt,
+            items: VERSION.changelog,
+          },
+          // 告诉页面这份公告是云端的还是本地兜底的，方便界面标注
+          announcementFrom: (ann && ann.items && ann.items.length) ? "cloud" : "local",
+          latest: {
+            version: latestVer,
+            downloadUrl,
+            note: String(latest.note || ""),
+          },
+          updateUrl: base,
+          newer,
+          // 云端共享题库（本地版答题先查它，再问大模型）
+          bank: {
+            url: base,
+            key: (cloud && cloud.bank && cloud.bank.key) || this.cfg.sharedBankKey || "shared",
+            total: (cloud && cloud.bank && cloud.bank.total) || 0,
+            enabled: !!base,
+            // 本地版有没有配大模型（看本机配置，不是云端的）
+            llmEnabled: !!(this.cfg.llmEnabled === true && this.cfg.llmApiKey),
+            llmModel: (this.cfg.llmEnabled === true && this.cfg.llmApiKey) ? (this.cfg.llmModel || "") : "",
+          },
+          cloud: cloud
+            ? { version: cloud.version, latestLocal: latestVer, newer, reachable: true }
+            : { reachable: false },
+        });
+      };
+
+      if (this._cloud || this._cloudTried) { handle(); return; }
+      this._cloudTried = true;
+      const timeout = new Promise((r) => setTimeout(r, 3000));
+      Promise.race([this.cloudInfo().catch(() => {}), timeout])
+        .then(handle)
+        .catch(handle);
       return;
     }
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 多用户云端服务（多人共用一台服务器）
  *
  * 特点：
@@ -322,7 +322,7 @@ function stateOf(uname) {
       skipCourse: rec.skipCourse || "",
       accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
       accuracyMax: rec.accuracyMax == null ? 100 : rec.accuracyMax,
-      workEnabled: rec.workEnabled !== false,
+      workEnabled: rec.workEnabled === true,
       workRounds: rec.workRounds == null ? 2 : rec.workRounds,
       answerRemoteEnabled: rec.answerRemoteEnabled === true,
       answerRemoteUrl: rec.answerRemoteUrl || "",
@@ -366,7 +366,7 @@ async function startTask(uname, courseIds) {
     humanMode: true,
     onlyCourse: Array.isArray(courseIds) && courseIds.length ? courseIds : null,
     // 章节测验/作业：自动作答 + 正确率区间（用户在页面上可改）
-    workEnabled: rec.workEnabled !== false,
+    workEnabled: rec.workEnabled === true,
     accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
     accuracyMax: rec.accuracyMax == null ? 100 : rec.accuracyMax,
     workRounds: rec.workRounds == null ? 2 : rec.workRounds,
@@ -849,7 +849,7 @@ function handle(req, res) {
         brushEnd: rec.brushEnd == null ? 24 : rec.brushEnd,
         accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
         accuracyMax: rec.accuracyMax == null ? 100 : rec.accuracyMax,
-        workEnabled: rec.workEnabled !== false,
+        workEnabled: rec.workEnabled === true,
         workRounds: rec.workRounds == null ? 2 : rec.workRounds,
         // 答题源：key/token 只回报"有没有配"
         answerRemoteEnabled: rec.answerRemoteEnabled === true,
