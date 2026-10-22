@@ -75,6 +75,13 @@ require("./tools/gen-page-module.js").build();
       saveCookie: "", domain: "https://mooc1-1.chaoxing.com/", debug: false,
       updateUrl: require("./version.js").updateUrl,
       skipCourse: "", parallel: 1, dailyHours: 24, brushStart: 0, brushEnd: 24, fid: "-1",
+      // 明确写出默认值，别让"字段不存在"变成不确定行为：
+      // 自动答题关闭（正确率不高，由用户自己决定开不开）、正确率区间 80~100
+      workEnabled: false,
+      accuracyMin: 80,
+      accuracyMax: 100,
+      llmEnabled: false,
+      answerRemoteEnabled: false,
     }, null, "\t") + "\n",
     "utf8"
   );

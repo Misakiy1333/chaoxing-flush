@@ -43,6 +43,12 @@ fs.writeFileSync(
     saveCookie: "", domain: "https://mooc1-1.chaoxing.com/", debug: false,
     updateUrl: VERSION.updateUrl,
     skipCourse: "", parallel: 1, dailyHours: 24, brushStart: 0, brushEnd: 24, fid: "-1",
+    // 和 build-exe.js 保持一致：自动答题默认关闭，正确率区间 80~100
+    workEnabled: false,
+    accuracyMin: 80,
+    accuracyMax: 100,
+    llmEnabled: false,
+    answerRemoteEnabled: false,
   }, null, 1) + "\n",
   "utf8"
 );
