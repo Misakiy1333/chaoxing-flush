@@ -4,9 +4,9 @@
  */
 module.exports = {
   // 本地版（exe）
-  version: "3.12.0",
+  version: "3.13.0",
   // 云端版（server-multi）
-  cloudVersion: "1.10.0",
+  cloudVersion: "1.11.0",
   buildAt: "2026-10-22 10:00",
   changelog: [
     "云端共享题库：所有账号答过的题汇到一起，答题时先查云端题库、再问大模型，同一道题不用重复花钱",
