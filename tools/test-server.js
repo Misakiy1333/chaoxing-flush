@@ -105,6 +105,26 @@ const sleep = (t) => new Promise((r) => setTimeout(r, t));
     const av = await req("POST", "/api/admin/announce", { body: { title: "x" } });
     ok("发公告需要管理员密码", av.code === 403);
 
+    // 云端共享题库：这条以前会 ReferenceError 把整个服务打死，必须守住
+    console.log("\n=== 云端共享题库 ===");
+    const bNoKey = await req("GET", "/api/bank");
+    ok("无密钥 GET /api/bank 401", bNoKey.code === 401);
+    const bKey = await req("GET", "/api/bank", { headers: { "x-bank-key": "shared" } });
+    let bj = null;
+    try { bj = JSON.parse(bKey.body); } catch (e) {}
+    ok("有密钥 GET /api/bank 正常", bKey.code === 200 && bj && bj.ok === true, bj && bj.total);
+    const bPush = await req("POST", "/api/bank", {
+      headers: { "x-bank-key": "shared" },
+      body: { entries: { k1: { type: 0, correct: "A", updatedAt: Date.now() } } },
+    });
+    let pj = null;
+    try { pj = JSON.parse(bPush.body); } catch (e) {}
+    ok("POST /api/bank 能推题且不崩", bPush.code === 200 && pj && pj.ok === true && pj.total >= 1, pj && ("total=" + pj.total + " added=" + pj.added));
+    const bBad = await req("POST", "/api/bank", { headers: { "x-bank-key": "shared" }, body: "{这不是JSON" });
+    ok("坏 JSON 不会打死服务", bBad.code === 200 || bBad.code === 400, "code=" + bBad.code);
+    const alive = await req("GET", "/health");
+    ok("题库接口出错后服务还活着", alive.code === 200 && alive.body.trim() === "ok");
+
     console.log("\n=== 鉴权 ===");
     const me401 = await req("GET", "/api/me");
     ok("无 Cookie /api/me 401", me401.code === 401);

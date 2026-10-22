@@ -214,7 +214,7 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
         </select>
       </div>
       <div style="min-width:88px"><label>正确率下限 %</label><input id="setAccMin" type="number" min="0" max="100" step="1" value="80"></div>
-      <div style="min-width:88px"><label>正确率上限 %</label><input id="setAccMax" type="number" min="0" max="100" step="1" value="90"></div>
+      <div style="min-width:88px"><label>正确率上限 %</label><input id="setAccMax" type="number" min="0" max="100" step="1" value="100"></div>
       <button class="ghost" id="saveSet2">保存正确率</button>
     </div>
     <div style="font-size:12px;color:#7b93a7;margin-top:9px">
@@ -474,9 +474,9 @@ function applySettings(me){
   if(s.dailyHours != null) $("setHours").value = s.dailyHours;
   if(s.brushStart != null) $("setStart").value = s.brushStart;
   if(s.brushEnd != null) $("setEnd").value = s.brushEnd;
-  // 章节测验 + 正确率区间（默认 80~90）
+  // 章节测验 + 正确率区间（默认 80~100）
   $("setAccMin").value = s.accuracyMin == null ? 80 : s.accuracyMin;
-  $("setAccMax").value = s.accuracyMax == null ? 90 : s.accuracyMax;
+  $("setAccMax").value = s.accuracyMax == null ? 100 : s.accuracyMax;
   $("setWorkOn").value = s.workEnabled === false ? "0" : "1";
   renderAccHint(s.accuracyMin, s.accuracyMax);
   renderSrc(s, true);

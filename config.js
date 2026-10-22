@@ -39,7 +39,7 @@ class Config {
     // 章节测验/作业自动作答 + 正确率区间（默认 80%~90%，界面上可改）
     this.workEnabled = true;
     this.accuracyMin = 80;
-    this.accuracyMax = 90;
+    this.accuracyMax = 100;
     this.workRounds = 2;
     // 在线答题源：外部题库接口（兼容 OCS AnswererWrapper）
     this.answerRemoteEnabled = false;
@@ -102,7 +102,7 @@ class Config {
       updateUrl: require("./version.js").updateUrl || "",
       workEnabled: true,
       accuracyMin: 80,
-      accuracyMax: 90,
+      accuracyMax: 100,
       workRounds: 2,
       answerRemoteEnabled: false,
       answerRemoteUrl: "",

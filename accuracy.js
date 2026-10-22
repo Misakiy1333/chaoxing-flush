@@ -155,6 +155,7 @@ function plan(opts) {
   let bestM = 0;
   let bestProb = -1;
   let bestGap = Infinity;
+  let bestScore = -Infinity;
   for (let m = 0; m <= known.length; m++) {
     const base = (known.length - m) * pointsPer;
     // 未知题答对 x 道时的总分概率
@@ -166,9 +167,16 @@ function plan(opts) {
       if (score >= loScore - 1e-9 && score <= hiScore + 1e-9) prob += w;
       gapSum += w * Math.abs(score - midScore);
     }
-    if (prob > bestProb + 1e-9 || (Math.abs(prob - bestProb) <= 1e-9 && gapSum < bestGap - 1e-9)) {
+    // 期望分：同样落进区间、离中点一样远时，宁可要高的（区间上限是 100 时就能拿满分）
+    const scoreEst = base + unknown.length * pointsPer * pUnknown;
+    const better =
+      prob > bestProb + 1e-9 ||
+      (Math.abs(prob - bestProb) <= 1e-9 && gapSum < bestGap - 1e-9) ||
+      (Math.abs(prob - bestProb) <= 1e-9 && Math.abs(gapSum - bestGap) <= 1e-9 && scoreEst > bestScore + 1e-9);
+    if (better) {
       bestProb = prob;
       bestGap = gapSum;
+      bestScore = scoreEst;
       bestM = m;
     }
   }

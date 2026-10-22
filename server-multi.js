@@ -315,7 +315,7 @@ function stateOf(uname) {
       parallel: 1,
       skipCourse: rec.skipCourse || "",
       accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
-      accuracyMax: rec.accuracyMax == null ? 90 : rec.accuracyMax,
+      accuracyMax: rec.accuracyMax == null ? 100 : rec.accuracyMax,
       workEnabled: rec.workEnabled !== false,
       workRounds: rec.workRounds == null ? 2 : rec.workRounds,
       answerRemoteEnabled: rec.answerRemoteEnabled === true,
@@ -362,7 +362,7 @@ async function startTask(uname, courseIds) {
     // 章节测验/作业：自动作答 + 正确率区间（用户在页面上可改）
     workEnabled: rec.workEnabled !== false,
     accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
-    accuracyMax: rec.accuracyMax == null ? 90 : rec.accuracyMax,
+    accuracyMax: rec.accuracyMax == null ? 100 : rec.accuracyMax,
     workRounds: rec.workRounds == null ? 2 : rec.workRounds,
     // 在线答题源：题库接口 + 大模型（账号没单独配就用服务器 .env 里的全局 key）
     answerRemoteEnabled: rec.answerRemoteEnabled === true,
@@ -459,7 +459,37 @@ async function startTask(uname, courseIds) {
 }
 
 // ---------- HTTP ----------
+// 兜底：任何未捕获异常只记日志，绝不让整个服务退出（以前一个请求出错就重启，
+// 重启循环会把所有号的刷课进度反复打断）
+process.on("uncaughtException", (e) => {
+  try {
+    console.error("[uncaught] " + ((e && e.stack) || e));
+  } catch (x) {}
+});
+process.on("unhandledRejection", (e) => {
+  try {
+    console.error("[unhandled] " + ((e && e.stack) || e));
+  } catch (x) {}
+});
+
 const server = http.createServer((req, res) => {
+  // 路由内部再包一层，单个接口抛错只影响这一次请求
+  try {
+    handle(req, res);
+  } catch (e) {
+    try {
+      console.error("[route] " + ((e && e.stack) || e));
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "服务器内部错误：" + (e && e.message) }));
+      } else {
+        res.end();
+      }
+    } catch (x) {}
+  }
+});
+
+function handle(req, res) {
   const u = req.url.split("?")[0];
   const url = new URL("http://x" + req.url);
   const db = loadUsers();
@@ -513,20 +543,19 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.method === "POST") {
-      readBody(req, 8 * 1024 * 1024)
-        .then((body) => {
-          let p = {};
-          try {
-            p = JSON.parse(body || "{}");
-          } catch (e) {
-            json({ ok: false, error: "不是合法 JSON" }, 400);
-            return;
-          }
-          const inc = p.entries && typeof p.entries === "object" ? p.entries : {};
-          const r = mergeSharedBank(inc);
-          json({ ok: true, total: r.total, added: r.added, updated: r.updated });
-        })
-        .catch(() => json({ ok: false, error: "读取失败" }, 400));
+      // 用统一的 body() 读请求体：之前这里引用了一个不存在的 readBody，
+      // 只要有人推题库就会抛 ReferenceError 把整个服务打死（重启循环的元凶）
+      body((p) => {
+        const inc = p && p.entries && typeof p.entries === "object" ? p.entries : {};
+        let r;
+        try {
+          r = mergeSharedBank(inc);
+        } catch (e) {
+          json({ ok: false, error: "合并失败：" + (e && e.message) }, 500);
+          return;
+        }
+        json({ ok: true, total: r.total, added: r.added, updated: r.updated });
+      });
       return;
     }
   }
@@ -813,7 +842,7 @@ const server = http.createServer((req, res) => {
         brushStart: rec.brushStart == null ? 0 : rec.brushStart,
         brushEnd: rec.brushEnd == null ? 24 : rec.brushEnd,
         accuracyMin: rec.accuracyMin == null ? 80 : rec.accuracyMin,
-        accuracyMax: rec.accuracyMax == null ? 90 : rec.accuracyMax,
+        accuracyMax: rec.accuracyMax == null ? 100 : rec.accuracyMax,
         workEnabled: rec.workEnabled !== false,
         workRounds: rec.workRounds == null ? 2 : rec.workRounds,
         // 答题源：key/token 只回报"有没有配"
@@ -1035,7 +1064,7 @@ const server = http.createServer((req, res) => {
   }
 
   json({ ok: false, error: "not found" }, 404);
-});
+}
 
 // 每 30 秒把运行中任务的状态落盘（服务器重启后前端还能看到进度）
 setInterval(() => {
