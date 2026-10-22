@@ -7,8 +7,10 @@ module.exports = {
   version: "3.13.0",
   // 云端版（server-multi）
   cloudVersion: "1.11.0",
-  buildAt: "2026-10-22 10:00",
+  buildAt: "2026-10-22 21:57",
   changelog: [
+    "页面视觉升级：三层氛围光背景、渐变标题、流光进度条、呼吸状态灯，前后台统一设计变量",
+    "题库存下选项文本：以前只存题干不存 A/B/C/D 的内容，模型只能靠常识硬猜，这才是正确率长期卡在四成的真正原因",
     "云端共享题库：所有账号答过的题汇到一起，答题时先查云端题库、再问大模型，同一道题不用重复花钱",
     "本地版自动接入云端题库：从云端 /api/version 拿地址和密钥，答完自动回传，越刷越准",
     "正确率区间默认 80~100：上限放到 100 后，全会做的卷子直接拿满分，不再故意错一道",
@@ -52,8 +54,7 @@ module.exports = {
    *   curl -X POST ".../api/admin/release?pwd=管理员密码" -H "Content-Type: application/json" ^
    *        -d "{\"version\":\"3.7\",\"downloadUrl\":\"https://wwx.lanzouj.com/xxxxx\",\"note\":\"修复了XXX\"}"
    */
-  latest: {
-    version: "3.8",
+  latest: { version: "3.13",
     downloadUrl: "", // 填蓝奏云分享链接；空则页面不显示下载按钮
     note: "本地版安装包（蓝奏云）",
   },
