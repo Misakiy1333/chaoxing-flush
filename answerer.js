@@ -359,7 +359,7 @@ function solve(bank, q) {
     // ② 多选：已确认成员 + 剩下靠未知补（保守：只用已确认成员）
     if (type === 1 && entry.members && entry.members.length) {
       const m = entry.members.filter((k) => keys.includes(k));
-      if (m.length) return { answer: m.join(""), from: "bank-members", confidence: 0.8 };
+      if (m.length) return { answer: m.join(""), from: "bank-members", confidence: 0.6 };
     }
     // ③ 单选/判断：排除法
     if ((type === 0 || type === 3) && entry.wrong && entry.wrong.length) {

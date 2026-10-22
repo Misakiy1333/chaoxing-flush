@@ -121,6 +121,8 @@ class QuizAgent {
           A.learn(this.bank, d.description, t, name, "marking_dui", optMap, 1);
           if (t === 3) A.learn(this.bank, d.description, 3, name, "marking_dui", { A: "对", B: "错" }, 1);
           this.saveBank();
+          // 弹题学到的答案也同步云端共享题库
+          if (this.provider && this.provider.pushShared) { try { await this.provider.pushShared(); } catch (e) {} }
           return { ok: true, right: true, answer: name, msg: j.msg };
         }
         return { ok: true, right: false, answer: name, msg: j.msg };

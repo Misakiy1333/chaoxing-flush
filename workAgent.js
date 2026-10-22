@@ -52,6 +52,7 @@ class WorkAgent {
         log: this.log,
         remote: opts && opts.remote,
         llm: opts && opts.llm,
+        shared: opts && opts.shared,
       });
     }
   }
@@ -352,6 +353,14 @@ class WorkAgent {
     return { ok: false, msg: (j && j.msg) || "重做请求失败", json: j };
   }
 
+  /** 拟人停顿：只有开了拟人模式才真的等，测试/关闭时立即返回 */
+  async _pace(minSec, maxSec, label) {
+    if (!this.hz || !this.hz.enabled || this.hz.stopped) return;
+    const ms = (minSec + Math.random() * (maxSec - minSec)) * 1000;
+    if (typeof this.hz.think === "function") await this.hz.think(ms, label);
+    else await new Promise((x) => setTimeout(x, ms));
+  }
+
   /**
    * 处理一个作业/测验任务点
    * @param {Object} ctx { courseid, clazzId, cpi, knowledgeid, workid, jobid, enc, ktoken, userid, title }
@@ -378,6 +387,17 @@ class WorkAgent {
     let cur = null;
     let fetchCtx = ctx;
 
+    // 开跑前先同步一次云端题库（别的账号答过的题直接可用，省大模型调用）
+    if (this.provider && this.provider.refreshShared) {
+      try {
+        const n = await this.provider.refreshShared(true);
+        if (n) this.log(`     ☁ 云端题库新增 ${n} 条`);
+      } catch (e) {}
+    }
+
+    // 点进测验要有个"翻页"的停顿，别一进章节就秒交
+    await this._pace(5, 15, "打开测验");
+
     while (round < maxRounds) {
       round++;
       res.rounds = round;
@@ -401,15 +421,16 @@ class WorkAgent {
       cur = page;
       res.fullScore = parseFloat(page.form.fullScore) || 100;
 
-      // ① 逐题求解（本地题库 → 在线答题源）
+      // ① 逐题求解（云端题库 → 外部题库 → 大模型），每题之间有"读题"停顿
       const solved = [];
       for (const q of page.questions) {
+        await this._pace(2.5, 7, "读题");
         const s = A.solve(this.bank, { id: q.id, type: q.type, title: q.title, options: q.options });
         let answer = s.answer;
         let from = s.from;
         let confidence = s.confidence;
-        // 本地完全没答案（单选/多选只能瞎猜）时，问问题库接口或大模型
-        if (!answer && this.provider && this.provider.online) {
+        // 本地没答案、或只有低置信度的常识猜测（判断题启发式）时，问问题库接口或大模型
+        if ((!answer || confidence < 0.7) && this.provider && this.provider.online) {
           let r = null;
           try {
             r = await this.provider.resolve({ id: q.id, type: Number(q.type), title: q.title, options: q.options });
@@ -457,7 +478,8 @@ class WorkAgent {
         `（已知 ${p.knownCount}，未知 ${p.unknownCount}），目标 ${p.target}%，${p.note}`
       );
 
-      // ④ 交卷
+      // ④ 交卷（交之前假装检查一遍答案）
+      await this._pace(4, 12, "检查答案");
       const body = WorkAgent.buildSubmitBody(page, answers);
       const sub = await this.submit(page, body);
       if (!sub.ok) {
@@ -468,8 +490,8 @@ class WorkAgent {
       this.stats.submitted++;
       if (this.hz && this.hz.betweenQuizTry) await this.hz.betweenQuizTry();
 
-      // ⑤ 查分 + 学答案
-      await new Promise((x) => setTimeout(x, 1800));
+      // ⑤ 查分 + 学答案（交完先停一下再看成绩，别 0.1 秒就刷出来）
+      await this._pace(6, 20, "等成绩");
       const rev = await this.fetchReview(fetchCtx, { workAnswerId: page.form.workAnswerId, workRelationId: page.form.workRelationId });
       if (rev && typeof rev.score === "number") res.score = rev.score;
       let learned = 0;
@@ -484,6 +506,9 @@ class WorkAgent {
           learned++;
         }
         this.saveBank();
+        // 学到的东西立刻同步到云端共享题库，别的账号也能用上
+        if (this.provider && this.provider.pullAndPush) await this.provider.pullAndPush();
+        else if (this.provider && this.provider.pushShared) { try { await this.provider.pushShared(); } catch (e) {} }
       }
       res.learned += learned;
       res.ratio = res.fullScore ? Math.round(((res.score || 0) / res.fullScore) * 1000) / 10 : null;

@@ -133,6 +133,11 @@ class AnswerProvider {
     this.bank = o.bank || A.emptyBank();
     this.onSaved = o.onSaved || null;
     this.remote = Object.assign({ enabled: false, url: "", token: "", timeoutMs: 12000 }, o.remote || {});
+    // 云端共享题库：所有账号答过的题汇在一起，本地没答案时先问它
+    this.shared = Object.assign(
+      { enabled: false, url: "", key: "", timeoutMs: 8000, pullMs: 60000 },
+      o.shared || {}
+    );
     this.llm = Object.assign(
       {
         enabled: false,
@@ -145,12 +150,106 @@ class AnswerProvider {
       o.llm || {}
     );
     this.log = o.log || (() => {});
-    this.stats = { remoteHit: 0, llmHit: 0, llmCalls: 0, failed: 0, cached: 0 };
+    this.stats = { remoteHit: 0, llmHit: 0, llmCalls: 0, failed: 0, cached: 0, cloudHit: 0, cloudPulled: 0, cloudPushed: 0 };
+    this._lastPull = 0;
   }
 
   /** 有没有配置任何在线答题源 */
   get online() {
-    return !!(this.remote.enabled && this.remote.url) || !!(this.llm.enabled && this.llm.baseUrl && this.llm.model);
+    return (
+      !!(this.shared.enabled && this.shared.url) ||
+      !!(this.remote.enabled && this.remote.url) ||
+      !!(this.llm.enabled && this.llm.baseUrl && this.llm.model)
+    );
+  }
+
+  /** 云端共享题库：拉下来并合并进本地题库（默认 60 秒内不重复拉） */
+  async refreshShared(force) {
+    if (!this.shared.enabled || !this.shared.url) return 0;
+    const now = Date.now();
+    if (!force && this._lastPull && now - this._lastPull < this.shared.pullMs) return 0;
+    this._lastPull = now;
+    let j = null;
+    try {
+      const r = await request(String(this.shared.url).replace(/\/+$/, "") + "/api/bank", {
+        method: "GET",
+        headers: { "x-bank-key": this.shared.key || "" },
+        timeoutMs: this.shared.timeoutMs,
+      });
+      if (r.status !== 200) {
+        this.stats.failed++;
+        return 0;
+      }
+      j = JSON.parse(r.text);
+    } catch (e) {
+      this.stats.failed++;
+      return 0;
+    }
+    if (!j || !j.ok || !j.entries) return 0;
+    const inc = j.entries;
+    const rank = (e) => (e && e.correct ? 3 : e && e.guess ? 2 : e && (e.wrong || e.members) ? 1 : 0);
+    let merged = 0;
+    for (const k of Object.keys(inc)) {
+      const e = inc[k];
+      if (!e) continue;
+      const old = this.bank.entries[k];
+      if (!old) {
+        this.bank.entries[k] = e;
+        merged++;
+        continue;
+      }
+      if (rank(e) > rank(old)) {
+        this.bank.entries[k] = Object.assign({}, old, e);
+        merged++;
+      } else if (rank(e) === rank(old) && rank(e) >= 1) {
+        const w = new Set([].concat(old.wrong || [], e.wrong || []));
+        const m = new Set([].concat(old.members || [], e.members || []));
+        this.bank.entries[k] = Object.assign({}, old, { wrong: Array.from(w), members: Array.from(m) });
+      }
+    }
+    this.stats.cloudPulled = merged;
+    if (merged && this.onSaved) this.onSaved();
+    return merged;
+  }
+
+  /** 把本地题库推回云端（答题/批阅后调用，服务端按可信度合并） */
+  async pushShared() {
+    if (!this.shared.enabled || !this.shared.url) return 0;
+    const all = this.bank.entries || {};
+    // 只推有用的条目：自检残留（没有 q 字段的假题）、空条目一律不推；
+    // type 缺失的按 0（单选）补齐，避免云端出现 type:null 的脏数据
+    const entries = {};
+    for (const k of Object.keys(all)) {
+      const e = all[k];
+      if (!e || typeof e !== "object") continue;
+      if (!e.q && !e.correct && !e.guess) continue;
+      const clean = Object.assign({}, e);
+      if (clean.type == null) clean.type = 0;
+      if (!clean.q) clean.q = k;
+      entries[k] = clean;
+    }
+    const n = Object.keys(entries).length;
+    if (!n) return 0;
+    try {
+      const r = await request(String(this.shared.url).replace(/\/+$/, "") + "/api/bank", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-bank-key": this.shared.key || "" },
+        body: JSON.stringify({ entries }),
+        timeoutMs: this.shared.timeoutMs,
+      });
+      if (r.status !== 200) {
+        this.stats.failed++;
+        return 0;
+      }
+      const j = JSON.parse(r.text);
+      if (j && j.ok) {
+        this.stats.cloudPushed = (j.added || 0) + (j.updated || 0);
+        return this.stats.cloudPushed;
+      }
+    } catch (e) {
+      this.stats.failed++;
+    }
+    return 0;
   }
 
   /**
@@ -159,7 +258,16 @@ class AnswerProvider {
    */
   async resolve(q) {
     if (!q || !q.title) return null;
-    // ① 外部题库
+    // ① 云端共享题库（别的账号答过的题，先问它，最省）
+    if (this.shared.enabled && this.shared.url) {
+      await this.refreshShared();
+      const hit = A.solve(this.bank, { type: Number(q.type), title: q.title, options: q.options || {} });
+      if (hit && hit.answer && hit.confidence >= 0.7) {
+        this.stats.cloudHit++;
+        return { answer: hit.answer, from: "cloud-bank", confidence: hit.confidence };
+      }
+    }
+    // ② 外部题库
     if (this.remote.enabled && this.remote.url) {
       const r = await this._askRemote(q);
       if (r) {
@@ -168,7 +276,7 @@ class AnswerProvider {
         return { answer: r, from: "remote-bank", confidence: 0.85 };
       }
     }
-    // ② 大模型
+    // ③ 大模型
     if (this.llm.enabled && this.llm.baseUrl && this.llm.model) {
       if (this.stats.llmCalls >= this.llm.maxCalls) {
         this.log(`     ⚠ 大模型调用已达上限 ${this.llm.maxCalls} 次，本次运行不再调用`);

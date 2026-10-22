@@ -105,6 +105,51 @@ const sleep = (t) => new Promise((r) => setTimeout(r, t));
     const av = await req("POST", "/api/admin/announce", { body: { title: "x" } });
     ok("发公告需要管理员密码", av.code === 403);
 
+    // 云端共享题库：这条以前会 ReferenceError 把整个服务打死，必须守住
+    console.log("\n=== 云端共享题库 ===");
+    const bNoKey = await req("GET", "/api/bank");
+    ok("无密钥 GET /api/bank 401", bNoKey.code === 401);
+    const bKey = await req("GET", "/api/bank", { headers: { "x-bank-key": "shared" } });
+    let bj = null;
+    try { bj = JSON.parse(bKey.body); } catch (e) {}
+    ok("有密钥 GET /api/bank 正常", bKey.code === 200 && bj && bj.ok === true, bj && bj.total);
+    const bPush = await req("POST", "/api/bank", {
+      headers: { "x-bank-key": "shared" },
+      body: { entries: { k1: { type: 0, correct: "A", updatedAt: Date.now() } } },
+    });
+    let pj = null;
+    try { pj = JSON.parse(bPush.body); } catch (e) {}
+    ok("POST /api/bank 能推题且不崩", bPush.code === 200 && pj && pj.ok === true && pj.total >= 1, pj && ("total=" + pj.total + " added=" + pj.added));
+    const bBad = await req("POST", "/api/bank", { headers: { "x-bank-key": "shared" }, body: "{这不是JSON" });
+    ok("坏 JSON 不会打死服务", bBad.code === 200 || bBad.code === 400, "code=" + bBad.code);
+    // 清洗：自检/空条目不该进云端题库，type 缺失要补成 0
+    const dirty = await req("POST", "/api/bank", {
+      headers: { "x-bank-key": "shared" },
+      body: {
+        entries: {
+          "自检题|A|B": { correct: "A", updatedAt: 1 },
+          空条目: {},
+          "正常题|甲|乙": { q: "正常题？", correct: "A" },
+        },
+      },
+    });
+    let dj = null;
+    try { dj = JSON.parse(dirty.body); } catch (e) {}
+    ok("脏数据被跳过（skipped>=1）", dirty.code === 200 && dj && dj.skipped >= 1, dj && ("skipped=" + dj.skipped + " added=" + dj.added));
+
+    const after = await req("GET", "/api/bank", { headers: { "x-bank-key": "shared" } });
+    let bankAfter = null;
+    try { bankAfter = JSON.parse(after.body); } catch (e) {}
+    const ents = (bankAfter && bankAfter.entries) || {};
+    const noNullType = Object.keys(ents).every((k) => ents[k].type != null);
+    const noBlank = Object.keys(ents).every((k) => ents[k].q || ents[k].correct || ents[k].guess);
+    ok("云端题库里没有 type:null", noNullType);
+    ok("云端题库里没有空条目", noBlank);
+    ok("正常条目已入库", !!ents["正常题|甲|乙"], Object.keys(ents).length + " 条");
+
+    const alive = await req("GET", "/health");
+    ok("题库接口出错后服务还活着", alive.code === 200 && alive.body.trim() === "ok");
+
     console.log("\n=== 鉴权 ===");
     const me401 = await req("GET", "/api/me");
     ok("无 Cookie /api/me 401", me401.code === 401);

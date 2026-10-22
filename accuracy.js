@@ -111,9 +111,12 @@ function plan(opts) {
   const known = [];
   const unknown = [];
   for (const q of questions) {
-    // 置信度低的答案（大模型猜的、题库模糊匹配的）按"不确定"处理，不能当已掌握
+    // 只有「题库里确认过的答案」（置信度 1）才算已掌握。
+    // 大模型/在线题库给的答案会错（实测 3 题卷以为满分、实际 66.6），
+    // 之前用 0.7 阈值把它当已知，压分计划直接崩，所以这里收紧到 1。
     const conf = q && q.confidence == null ? 1 : Number(q.confidence);
-    if (q && q.answer && conf >= 0.9) known.push(q);
+    const trusted = q && q.from === "provider" ? false : conf >= 1 - 1e-9;
+    if (q && q.answer && trusted) known.push(q);
     else unknown.push(q);
   }
   out.knownCount = known.length;
@@ -129,32 +132,61 @@ function plan(opts) {
   let expectedUnknown = 0;
   for (const q of unknown) {
     const conf = Number(q.confidence);
-    const p = conf > 0 && conf < 0.9 ? conf : GUESS_PROB[Number(q.type)];
+    // 有答案就按它的置信度算（大模型 0.85 就按 85% 可能对）；纯瞎猜才用题型概率
+    const p = q && q.answer && conf > 0 ? conf : GUESS_PROB[Number(q.type)];
     expectedUnknown += pointsPer * (p == null ? 0.2 : p);
   }
 
-  // 枚举"已知题答对 k 道"，挑最接近目标分的方案
+  // 枚举"已知题故意答错 m 道"，挑**落在区间内概率最大**的方案
+  // 为什么不是按期望分挑：期望分落在区间里，实际可能一半概率满分、一半概率偏低。
+  // 未知题是抛硬币（大模型也可能答错），所以要把这份随机性算进去。
   const loScore = (fullScore * range.min) / 100;
   const hiScore = (fullScore * range.max) / 100;
-  let bestK = known.length;
-  let bestCost = Infinity;
-  for (let k = 0; k <= known.length; k++) {
-    const score = k * pointsPer + expectedUnknown;
-    let cost;
-    if (score >= loScore - 1e-9 && score <= hiScore + 1e-9) {
-      cost = Math.abs(score - targetScore); // 区间内：越接近目标越好
-    } else if (score > hiScore) {
-      cost = 2e6 + (score - hiScore); // 超上限：最不该出现（满分一眼假）
-    } else {
-      cost = 1e6 + (loScore - score); // 低于下限：次优，但比冲高好
+  const midScore = (loScore + hiScore) / 2;
+
+  // 未知题答对的综合概率
+  let pUnknown = 0;
+  if (unknown.length) {
+    let sum = 0;
+    for (const q of unknown) {
+      const conf = Number(q.confidence);
+      const p = q && q.answer && conf > 0 ? conf : GUESS_PROB[Number(q.type)];
+      sum += p == null ? 0.2 : p;
     }
-    if (cost < bestCost - 1e-9) {
-      bestCost = cost;
-      bestK = k;
+    pUnknown = sum / unknown.length;
+  }
+
+  let bestM = 0;
+  let bestProb = -1;
+  let bestGap = Infinity;
+  let bestScore = -Infinity;
+  for (let m = 0; m <= known.length; m++) {
+    const base = (known.length - m) * pointsPer;
+    // 未知题答对 x 道时的总分概率
+    let prob = 0;
+    let gapSum = 0;
+    for (let x = 0; x <= unknown.length; x++) {
+      const w = binomPmf(unknown.length, x, pUnknown);
+      const score = base + x * pointsPer;
+      if (score >= loScore - 1e-9 && score <= hiScore + 1e-9) prob += w;
+      gapSum += w * Math.abs(score - midScore);
+    }
+    // 期望分：同样落进区间、离中点一样远时，宁可要高的（区间上限是 100 时就能拿满分）
+    const scoreEst = base + unknown.length * pointsPer * pUnknown;
+    const better =
+      prob > bestProb + 1e-9 ||
+      (Math.abs(prob - bestProb) <= 1e-9 && gapSum < bestGap - 1e-9) ||
+      (Math.abs(prob - bestProb) <= 1e-9 && Math.abs(gapSum - bestGap) <= 1e-9 && scoreEst > bestScore + 1e-9);
+    if (better) {
+      bestProb = prob;
+      bestGap = gapSum;
+      bestScore = scoreEst;
+      bestM = m;
     }
   }
 
-  const missCount = known.length - bestK;
+  const missCount = bestM;
+  out.probInRange = Math.max(0, bestProb);
   const shuffled = seededShuffle(known, rng);
   const missSet = new Set(shuffled.slice(0, missCount).map((q) => String(q.id)));
 
@@ -176,16 +208,28 @@ function plan(opts) {
         : "";
   }
 
-  out.expected = bestK * pointsPer + expectedUnknown;
-  out.reachable = out.expected >= loScore - 1e-9 && out.expected <= hiScore + 1e-9;
+  out.expected = (known.length - missCount) * pointsPer + expectedUnknown;
+  const lo2 = (fullScore * range.min) / 100;
+  const hi2 = (fullScore * range.max) / 100;
+  out.reachable = out.expected >= lo2 - 1e-9 && out.expected <= hi2 + 1e-9;
   if (out.reachable) {
-    out.note = `预计 ${round1(out.expected)}/${fullScore} 分，落在 ${range.min}~${range.max}% 内`;
-  } else if (out.expected > hiScore) {
-    out.note = `预计 ${round1(out.expected)}/${fullScore} 分，高于上限（已知题太多，压不下来）`;
+    out.note = `预计 ${round1(out.expected)}/${fullScore} 分（落区间概率 ${Math.round(out.probInRange * 100)}%），落在 ${range.min}~${range.max}% 内`;
+  } else if (out.expected > hi2) {
+    out.note = `预计 ${round1(out.expected)}/${fullScore} 分，高于上限（${known.length} 道已知题、每题 ${round1(pointsPer)} 分，压不进区间）`;
   } else {
     out.note = `预计 ${round1(out.expected)}/${fullScore} 分，低于下限（已知题不够，多刷几章积累题库）`;
   }
   return out;
+}
+
+/** 二项分布概率质量：n 次里成功 k 次的概率 */
+function binomPmf(n, k, p) {
+  if (k < 0 || k > n) return 0;
+  if (p <= 0) return k === 0 ? 1 : 0;
+  if (p >= 1) return k === n ? 1 : 0;
+  let c = 1; // C(n,k)
+  for (let i = 0; i < k; i++) c = (c * (n - i)) / (i + 1);
+  return c * Math.pow(p, k) * Math.pow(1 - p, n - k);
 }
 
 function round1(x) {

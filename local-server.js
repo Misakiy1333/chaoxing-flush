@@ -57,6 +57,11 @@ class LocalServer {
     return this;
   }
 
+  /** 云端更新服务器地址（共享题库也走它） */
+  _bankBase() {
+    return String((this.cfg && this.cfg.updateUrl) || VERSION.updateUrl || "").replace(/\/+$/, "");
+  }
+
   /** 向云端查最新版本与公告（缓存 1 小时，失败不影响本地使用） */
   async cloudInfo(force) {
     const now = Date.now();
@@ -91,7 +96,7 @@ class LocalServer {
       brushEnd: this.cfg.brushEnd == null ? 24 : Number(this.cfg.brushEnd),
       skipCourse: this.cfg.skipCourse || "",
       accuracyMin: this.cfg.accuracyMin == null ? 80 : Number(this.cfg.accuracyMin),
-      accuracyMax: this.cfg.accuracyMax == null ? 90 : Number(this.cfg.accuracyMax),
+      accuracyMax: this.cfg.accuracyMax == null ? 100 : Number(this.cfg.accuracyMax),
       workEnabled: this.cfg.workEnabled !== false,
       workRounds: this.cfg.workRounds == null ? 2 : Number(this.cfg.workRounds),
       answerRemoteEnabled: this.cfg.answerRemoteEnabled === true,
@@ -101,7 +106,10 @@ class LocalServer {
       llmBaseUrl: this.cfg.llmBaseUrl || "",
       llmModel: this.cfg.llmModel || "",
       llmMaxCalls: this.cfg.llmMaxCalls == null ? 200 : Number(this.cfg.llmMaxCalls),
-      hasLlmKey: !!this.cfg.llmApiKey,
+      hasLlmKey: !!(this.cfg.llmApiKey || (this._cloud && this._cloud.bank && this._cloud.bank.llmEnabled)),
+      // 云端共享题库
+      sharedBankUrl: this.cfg.sharedBankUrl || this._bankBase() || "",
+      bankTotal: (this._cloud && this._cloud.bank && this._cloud.bank.total) || 0,
     };
   }
 
@@ -169,10 +177,10 @@ class LocalServer {
       speed: 1,
       humanMode: true,
       onlyCourse: Array.isArray(courseIds) && courseIds.length ? courseIds.map(String) : null,
-      // 章节测验/作业 + 正确率区间（设置页可改，默认 80~90）
+      // 章节测验/作业 + 正确率区间（设置页可改，默认 80~100）
       workEnabled: this.cfg.workEnabled !== false,
       accuracyMin: this.cfg.accuracyMin == null ? 80 : Number(this.cfg.accuracyMin),
-      accuracyMax: this.cfg.accuracyMax == null ? 90 : Number(this.cfg.accuracyMax),
+      accuracyMax: this.cfg.accuracyMax == null ? 100 : Number(this.cfg.accuracyMax),
       workRounds: this.cfg.workRounds == null ? 2 : Number(this.cfg.workRounds),
       // 在线答题源
       answerRemoteEnabled: this.cfg.answerRemoteEnabled === true,
@@ -183,6 +191,9 @@ class LocalServer {
       llmApiKey: this.cfg.llmApiKey || "",
       llmModel: this.cfg.llmModel || "",
       llmMaxCalls: this.cfg.llmMaxCalls == null ? 200 : Number(this.cfg.llmMaxCalls),
+      // 云端共享题库：本地版也用云端题库（地址取自更新服务器，配了就生效）
+      sharedBankUrl: this.cfg.sharedBankUrl || this._bankBase() || "",
+      sharedBankKey: this.cfg.sharedBankKey || (this._cloud && this._cloud.bank && this._cloud.bank.key) || "shared",
       log: (l) => this.log(l),
     };
 
@@ -327,6 +338,16 @@ class LocalServer {
         },
         updateUrl: base,
         newer,
+        // 云端共享题库（本地版答题先查它，再问大模型）
+        bank: {
+          url: base,
+          key: (cloud && cloud.bank && cloud.bank.key) || this.cfg.sharedBankKey || "shared",
+          total: (cloud && cloud.bank && cloud.bank.total) || 0,
+          enabled: !!base,
+          // 本地版有没有配大模型（看本机配置，不是云端的）
+          llmEnabled: !!(this.cfg.llmEnabled === true && this.cfg.llmApiKey),
+          llmModel: (this.cfg.llmEnabled === true && this.cfg.llmApiKey) ? (this.cfg.llmModel || "") : "",
+        },
         cloud: cloud
           ? {
               version: cloud.version,
