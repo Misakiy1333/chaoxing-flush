@@ -683,15 +683,10 @@ function renderBankHint(b){
     "　（" + b.url + "）" + (b.llmEnabled ? "　· 大模型 " + (b.llmModel || "已开启") : "　· 大模型未配置");
 }
 function renderAnnounce(){
+  // 和 loadNotice 共用一套渲染与"已读"记录，避免两套逻辑互相覆盖
   var a = ver.announcement;
   if(!a || !a.items || !a.items.length) return;
-  var seen = "";
-  try{ seen = localStorage.getItem("annSeen") || ""; }catch(e){}
-  if(seen === a.id) return;
-  $("annTitle").textContent = a.title || "更新公告";
-  $("annDate").textContent = a.date || "";
-  $("annBody").innerHTML = a.items.map(function(x){ return "<div>· " + esc(x) + "</div>"; }).join("");
-  $("annCard").style.display = "block";
+  paintNotice(a, false);
 }
 function renderVersionLine(){
   var p = [];
@@ -1203,24 +1198,51 @@ function render(s){
   }
 }
 
-/* ---------- 云端公告（本地版和云端都从这里拿） ---------- */
+/* ---------- 云端公告（本地版和云端都从这里拿） ----------
+ * 以前有两套公告显示逻辑：annCard（用 annSeen）和 noticeBar（用 noticeSeen）。
+ * 两套都跟着同一份数据跑，谁先执行谁把内容画上去，另一个就显得"没生效"；
+ * 而且"已读"记在两个不同的键里，收起一次下次还会再弹。
+ * 现在统一走 noticeBar 一套，annSeen 旧键自动迁移，避免老用户看不到新公告。
+ */
+var NOTICE_SEEN_KEY = "noticeSeen";
+function noticeSeenId(){
+  var s = "";
+  try{
+    s = localStorage.getItem(NOTICE_SEEN_KEY) || "";
+    if(!s){ s = localStorage.getItem("annSeen") || ""; }   // 兼容旧键
+  }catch(e){}
+  return s;
+}
+function noticeMarkSeen(id){
+  try{
+    localStorage.setItem(NOTICE_SEEN_KEY, id);
+    localStorage.removeItem("annSeen");
+  }catch(e){}
+}
+/** 画公告。force=true 时忽略"已读"，用于手动点开「更新公告」 */
+function paintNotice(a, force){
+  if(!$("noticeBar") || !a || !a.items || !a.items.length) return;
+  var id = String(a.id || a.date || a.title || "");
+  // 标题、日期始终同步，方便页面其它地方引用
+  if($("annTitle")) $("annTitle").textContent = a.title || "更新公告";
+  if($("annDate"))  $("annDate").textContent  = a.date || "";
+  if($("annBody"))  $("annBody").innerHTML = a.items.map(function(x){ return "<div>· " + esc(x) + "</div>"; }).join("");
+  if(!force && noticeSeenId() === id) return;
+  $("noticeTitle").textContent = a.title || "更新公告";
+  $("noticeDate").textContent = a.date || "";
+  $("noticeItems").innerHTML = a.items.map(function(x){ return "<li>" + esc(x) + "</li>"; }).join("");
+  $("noticeBar").classList.remove("hide");
+  $("noticeClose").onclick = function(ev){
+    ev.preventDefault();
+    $("noticeBar").classList.add("hide");
+    noticeMarkSeen(id);
+  };
+}
 function loadNotice(){
   fetch("/api/version").then(function(r){ return r.json(); }).then(function(j){
     var a = (j && j.announcement) || null;
     if(!a || !a.items || !a.items.length) return;
-    var id = String(a.id || a.date || a.title || "");
-    var seen = "";
-    try{ seen = localStorage.getItem("noticeSeen") || ""; }catch(e){}
-    if(seen === id) return; // 看过的就收着，点开「更新公告」还能看
-    $("noticeTitle").textContent = a.title || "更新公告";
-    $("noticeDate").textContent = a.date || "";
-    $("noticeItems").innerHTML = (a.items || []).map(function(x){ return "<li>" + esc(x) + "</li>"; }).join("");
-    $("noticeBar").classList.remove("hide");
-    $("noticeClose").onclick = function(ev){
-      ev.preventDefault();
-      $("noticeBar").classList.add("hide");
-      try{ localStorage.setItem("noticeSeen", id); }catch(e){}
-    };
+    paintNotice(a, false);
   }).catch(function(){});
 }
 loadNotice();

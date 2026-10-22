@@ -340,6 +340,8 @@ label{display:block;font-size:12px;color:var(--txt-dim);margin-bottom:6px;font-w
 <script>
 var D = {};      // 最近一次 overview 数据
 var timer = null;
+var annLoaded = false;   // 公告输入框是否已用服务器数据初始化过
+var annDirty = false;    // 公告输入框是否被手动改过（改过就不再被自动刷新覆盖）
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ var d=document.createElement("div"); d.textContent=(s==null?"":String(s)); return d.innerHTML; }
@@ -423,9 +425,18 @@ function render(){
   });
 
   // 公告
+  // 注意：load() 每 5 秒自动跑一次，若无条件回填输入框，管理员正在写的公告
+  // 会在 5 秒内被服务器上的旧内容覆盖掉——这是"发公告不好用"的主因。
+  // 首次加载一定回填；之后只有输入框为空、或未被手动编辑时才回填。
   var a = D.announce || {};
-  $("annTitle").value = a.title || "更新公告";
-  $("annItems").value = (a.items || []).join("\n");
+  if(!annLoaded){
+    $("annTitle").value = a.title || "更新公告";
+    $("annItems").value = (a.items || []).join("\n");
+    annLoaded = true;
+  }else if(!annDirty){
+    if(!$("annTitle").value) $("annTitle").value = a.title || "更新公告";
+    if(!$("annItems").value) $("annItems").value = (a.items || []).join("\n");
+  }
 
   // 下载
   var rel = D.release || {};
@@ -465,9 +476,18 @@ $("wlAddBtn").onclick = function(){
   wlPost({ add: list }).then(function(){ $("wlInput").value = ""; });
 };
 
+// 一旦开始编辑公告，就标记为"脏"，自动刷新不再覆盖输入框
+["annTitle","annItems"].forEach(function(id){
+  var el = $(id);
+  if(el) el.addEventListener("input", function(){ annDirty = true; });
+});
+
 $("annSave").onclick = async function(){
   var items = $("annItems").value.split(/\r?\n/).map(function(x){ return x.trim(); }).filter(Boolean);
   if(!items.length){ msg("annMsg","公告内容不能为空","err"); return; }
+  var btn = this;
+  btn.disabled = true;
+  msg("annMsg","发布中…","");
   try{
     var j = await api("/api/admin/announce", {
       method:"POST", headers:{ "Content-Type":"application/json" },
@@ -478,10 +498,24 @@ $("annSave").onclick = async function(){
         items: items,
       }),
     });
-    if(!j.ok) throw new Error(j.error||"发布失败");
-    msg("annMsg", "已发布（" + items.length + " 条）", "ok");
-    load();
-  }catch(e){ msg("annMsg", "失败：" + e.message, "err"); }
+    // 后端出错时会返回 { ok:false, error:"..." }，这里要把原因原样告诉用户，
+    // 以前统一抛 "NOAUTH" 或空消息，管理员完全看不出是权限、网络还是内容问题。
+    if(!j || !j.ok) throw new Error((j && j.error) || "服务器拒绝了请求");
+    msg("annMsg", "✔ 已发布（" + items.length + " 条），用户刷新页面即可看到", "ok");
+    // 发布成功后：清掉草稿标记，并用服务器返回的内容回填，保证与线上一致
+    annDirty = false;
+    var saved = j.announcement || {};
+    D.announce = saved;
+    $("annTitle").value = saved.title || "更新公告";
+    $("annItems").value = (saved.items || items).join("\n");
+  }catch(e){
+    var m = e && e.message;
+    if(m === "NOAUTH") m = "无权限（请用管理员账号登录后重试）";
+    else if(!m || m === "Failed to fetch") m = "连不上服务器，检查网络或服务是否在运行";
+    msg("annMsg", "发布失败：" + m, "err");
+  }finally{
+    btn.disabled = false;
+  }
 };
 
 $("relSave").onclick = async function(){
