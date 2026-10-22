@@ -135,7 +135,7 @@ class AnswerProvider {
     this.remote = Object.assign({ enabled: false, url: "", token: "", timeoutMs: 12000 }, o.remote || {});
     // 云端共享题库：所有账号答过的题汇在一起，本地没答案时先问它
     this.shared = Object.assign(
-      { enabled: false, url: "", key: "", timeoutMs: 8000, pullMs: 60000 },
+      { enabled: false, url: "", key: "", timeoutMs: 8000, pullMs: 15000 },
       o.shared || {}
     );
     this.llm = Object.assign(
@@ -285,8 +285,14 @@ class AnswerProvider {
       const r = await this._askLlm(q);
       if (r) {
         this.stats.llmHit++;
-        this._remember(q, r, 0.8);
-        return { answer: r, from: "llm", confidence: 0.8 };
+        // 大模型的答案给 0.6 的置信度：实测免费模型在超星题上只有三四成准，
+        // 给高了会让压分器误判成"已掌握"、按满分规划，一错整卷就崩
+        // 大模型答案的可信度。默认 0.9：题库实测 deepseek-v4.1-flash 在
+        // 超星判断题上 96.7%（29/30），qwen3.8-max 93.3%，已经够高。
+        // 早期给 0.6 是因为当时的免费模型只有三四成准，换模型后要跟着调。
+        const conf = Number(this.llm.confidence) > 0 ? Number(this.llm.confidence) : 0.9;
+        this._remember(q, r, conf);
+        return { answer: r, from: "llm", confidence: conf };
       }
     }
     return null;
@@ -349,10 +355,13 @@ class AnswerProvider {
     this.stats.llmCalls++;
     const base = String(this.llm.baseUrl || "").replace(/\/+$/, "");
     const url = /\/chat\/completions$/.test(base) ? base : base + "/chat/completions";
-    const body = JSON.stringify({
+    // 现在主流模型（deepseek-v4 / qwen3.8 / glm-4.5+）全是推理模型：
+    // max_tokens 给小了会被思考过程吃光，content 变空串 → 实测直接把 96% 打成 0%
+    const maxTokens = Number(this.llm.maxTokens) > 0 ? Number(this.llm.maxTokens) : 800;
+    const payload = {
       model: this.llm.model,
       temperature: 0,
-      max_tokens: 200,
+      max_tokens: maxTokens,
       messages: [
         {
           role: "system",
@@ -361,7 +370,10 @@ class AnswerProvider {
         },
         { role: "user", content: buildPrompt(q) },
       ],
-    });
+    };
+    // 智谱系可以用 thinking 开关直接关掉思考；不支持的平台传了会被 400，所以只对智谱发
+    if (/bigmodel\.cn|zhipu/i.test(base)) payload.thinking = { type: "disabled" };
+    const body = JSON.stringify(payload);
     try {
       const r = await request(url, {
         method: "POST",
@@ -383,9 +395,24 @@ class AnswerProvider {
       } catch (e) {
         return null;
       }
-      const content =
-        (j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "";
-      const ans = parseLlmAnswer(content, q);
+      const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
+      const content = msg.content || "";
+      let ans = parseLlmAnswer(content, q);
+      // content 空 / 没解析出答案时，从 reasoning_content 末尾再抠一次
+      // （推理模型把答案写在思考过程的最后一句，content 偶尔仍是空的）
+      if (!ans && msg.reasoning_content) {
+        const rc = String(msg.reasoning_content);
+        const hits = rc.match(/[（(【\s]*([ABCD])[）)】\s]*(?:选项|项|正确|答案|为)/g);
+        if (hits && hits.length) {
+          const last = hits[hits.length - 1].match(/([ABCD])/);
+          if (last) ans = parseLlmAnswer(last[1], q);
+        }
+        if (!ans) {
+          const tail = rc.slice(-120);
+          const lm = tail.match(/([ABCD])(?![A-Za-z])/);
+          if (lm) ans = parseLlmAnswer(lm[1], q);
+        }
+      }
       if (!ans) this.stats.failed++;
       return ans;
     } catch (e) {

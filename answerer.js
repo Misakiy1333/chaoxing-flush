@@ -236,6 +236,24 @@ function entryOf(bank, question) {
   return bank.entries[k];
 }
 
+/**
+ * 把题目选项一起存档。
+ * 之前只存题干不存选项，导致后来答题时给模型看的只有题干、没有 A/B/C/D 内容，
+ * 模型只能靠常识硬猜——这是正确率长期卡在四成左右的真正原因。
+ */
+function rememberOptions(bank, question, options) {
+  const keys = options && typeof options === "object" ? Object.keys(options) : [];
+  if (!keys.length) return;
+  const e = entryOf(bank, question);
+  const clean = {};
+  for (const k of keys) {
+    const v = String(options[k] == null ? "" : options[k]).replace(/\s+/g, " ").trim();
+    if (v) clean[k] = v.slice(0, 200);
+  }
+  if (Object.keys(clean).length) e.options = clean;
+  return e.options;
+}
+
 /** 在题库里找同题（先精确，再相似度） */
 function findEntry(bank, question, threshold) {
   const th = threshold == null ? 0.6 : threshold;
@@ -265,10 +283,19 @@ function findEntry(bank, question, threshold) {
  * @param {Object} options 选项表 { A: "文本" }
  * @param {number} ratio 得分率 0~1（可选，比 mark 更精确）
  */
-function learn(bank, question, type, myAnswer, mark, options, ratio) {
+function learn(bank, question, type, myAnswer, mark, options, ratio, correctAnswer) {
   const e = entryOf(bank, question);
   e.type = type;
   e.updatedAt = Date.now();
+  // 顺手把选项也存下来，下次答题时模型就能看到完整的 A/B/C/D
+  if (options && Object.keys(options).length) {
+    const clean = {};
+    for (const k of Object.keys(options)) {
+      const v = String(options[k] == null ? "" : options[k]).replace(/\s+/g, " ").trim();
+      if (v) clean[k] = v.slice(0, 200);
+    }
+    if (Object.keys(clean).length) e.options = clean;
+  }
   // 已经批阅出结果了，之前在线答题源留下的猜测就没用了
   if (e.guess) {
     delete e.guess;
@@ -276,6 +303,51 @@ function learn(bank, question, type, myAnswer, mark, options, ratio) {
   }
   const keys = Object.keys(options || {}).sort();
   const r = typeof ratio === "number" ? ratio : mark === "marking_dui" ? 1 : mark === "marking_bandui" ? 0.5 : 0;
+
+  // 【最可靠的一条】批阅页通常直接给出「正确答案」(.correctAnswer .answerCon)。
+  // 有它就不必靠"答对了才敢确认"或排除法慢慢推，一次就能把题彻底锁死。
+  // 早期版本解析出了这个字段却没往这传，所以题库堆了一堆 correct:null 的题。
+  const direct = correctAnswer == null ? "" : String(correctAnswer).replace(/\s+/g, " ").trim();
+  if (direct && !/^(正确答案|未作答|null|undefined|-)$/i.test(direct)) {
+    if (type === 3) {
+      const b = toBool(direct);
+      if (b != null) {
+        e.correct = b === true ? "A" : "B";
+        e.wrong = [b === true ? "B" : "A"];
+        e.from = "review";
+        return e;
+      }
+      const L = direct.toUpperCase().match(/[AB]/);
+      if (L) {
+        e.correct = L[0];
+        e.wrong = [L[0] === "A" ? "B" : "A"];
+        e.from = "review";
+        return e;
+      }
+    } else if (type === 0) {
+      const L = extractLetters(direct, options);
+      if (L.length) {
+        e.correct = L.join("");
+        e.wrong = keys.filter((k) => !L.includes(k));
+        e.from = "review";
+        return e;
+      }
+    } else if (type === 1) {
+      const L = extractLetters(direct, options);
+      if (L.length) {
+        e.correct = L.slice().sort().join("");
+        e.members = L.slice().sort();
+        e.wrong = keys.filter((k) => !L.includes(k));
+        e.from = "review";
+        return e;
+      }
+    } else if (type === 2) {
+      e.correct = direct;
+      e.from = "review";
+      return e;
+    }
+  }
+
   const letters = extractLetters(myAnswer, options);
   if (myAnswer) e.tried[String(myAnswer)] = r;
 
@@ -346,6 +418,10 @@ function solve(bank, q) {
   const type = Number(q.type);
   const options = q.options || {};
   const keys = Object.keys(options).sort();
+  // 顺手补存选项：老题库里大量记录只有题干没有选项，模型没选项就只能瞎猜
+  try {
+    if (keys.length) rememberOptions(bank, q.title, options);
+  } catch (e) {}
   const entry = findEntry(bank, q.title);
 
   if (entry) {
@@ -402,6 +478,7 @@ module.exports = {
   migrateBank,
   saveBank,
   entryOf,
+  rememberOptions,
   findEntry,
   learn,
   solve,

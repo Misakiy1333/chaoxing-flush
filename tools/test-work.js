@@ -157,6 +157,31 @@ function group(title) {
     const s = A.solve(bank, { type: 1, title: q, options: opts4 });
     assert.strictEqual(s.answer, "ABC");
   });
+  // 回归：题库必须存下选项文本。曾经只存题干不存 options，
+  // 答题时给模型看的只有题干、没有 A/B/C/D 内容，模型只能靠常识硬猜，
+  // 这是正确率长期卡在四成左右、而不是模型本身不行的真正原因。
+  t("learn 会把选项文本一起存进题库", () => {
+    const bank = A.emptyBank();
+    A.learn(bank, "带选项的题", 0, "A", "marking_dui", opts4, 1);
+    const e = A.findEntry(bank, "带选项的题");
+    assert.ok(e.options, "题库记录应当有 options 字段");
+    assert.strictEqual(e.options.A, opts4.A);
+    assert.strictEqual(e.options.D, opts4.D);
+  });
+  t("rememberOptions 单独调用也能补存选项", () => {
+    const bank = A.emptyBank();
+    A.rememberOptions(bank, "补存选项的题", opts4);
+    const e = A.findEntry(bank, "补存选项的题");
+    assert.ok(e.options);
+    assert.deepStrictEqual(Object.keys(e.options).sort(), ["A", "B", "C", "D"]);
+  });
+  t("solve 遇到新题会把选项顺手补进题库", () => {
+    const bank = A.emptyBank();
+    A.solve(bank, { type: 0, title: "从没见过的题", options: opts4 });
+    const e = A.findEntry(bank, "从没见过的题");
+    assert.ok(e && e.options, "solve 应当补存 options");
+    assert.strictEqual(e.options.B, opts4.B);
+  });
   t("判断题答错 → 直接学到反面", () => {
     const bank = A.emptyBank();
     const q = "高等学校开设国家安全教育公共基础课程";

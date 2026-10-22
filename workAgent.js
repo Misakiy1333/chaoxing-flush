@@ -403,6 +403,17 @@ class WorkAgent {
       res.rounds = round;
       if (this.hz && this.hz.beforeQuiz) await this.hz.beforeQuiz();
 
+      // 每份卷子开答前强制同步一次云端题库：题库涨得很快（别的号也在往里写），
+      // 只在 run() 开头拉一次的话，后面几百份卷子都看不到新增的题，云库命中率会一直是 0
+      if (this.provider && this.provider.refreshShared) {
+        try {
+          const add = await this.provider.refreshShared(true);
+          if (add > 0) this.log(`     ☁ 开考前同步云端题库 +${add} 条`);
+        } catch (e) {
+          this.log(`     ⚠ 云端题库同步失败: ${e.message}`);
+        }
+      }
+
       const got = await this.fetch(fetchCtx);
       const page = WorkAgent.parsePage(got.html);
 
@@ -423,6 +434,7 @@ class WorkAgent {
 
       // ① 逐题求解（云端题库 → 外部题库 → 大模型），每题之间有"读题"停顿
       const solved = [];
+      const dbg = [];
       for (const q of page.questions) {
         await this._pace(2.5, 7, "读题");
         const s = A.solve(this.bank, { id: q.id, type: q.type, title: q.title, options: q.options });
@@ -430,18 +442,33 @@ class WorkAgent {
         let from = s.from;
         let confidence = s.confidence;
         // 本地没答案、或只有低置信度的常识猜测（判断题启发式）时，问问题库接口或大模型
-        if ((!answer || confidence < 0.7) && this.provider && this.provider.online) {
+        const needOnline = (!answer || confidence < 0.7) && this.provider && this.provider.online;
+        if (needOnline) {
           let r = null;
           try {
             r = await this.provider.resolve({ id: q.id, type: Number(q.type), title: q.title, options: q.options });
           } catch (e) {
             r = null;
           }
+          // 【排除法收题】本地连一个确定的答案都没有、又已经是第 2 轮以后的重做，
+          // 就不要再问模型了（问了也是猜，白烧额度）——直接换一个"还没试过"的选项，
+          // 答错就能把这个选项永久排除；几轮下来四选一自然收敛到唯一答案。
+          const localKnown = s.answer && s.confidence >= 1;
+          if (!localKnown && round > 1 && !(r && r.answer && r.confidence >= 0.9)) {
+            const probe = this._probeFor(q);
+            if (probe) {
+              answer = probe;
+              from = "probe";
+              confidence = 0;
+              dbg.push(`题${q.id} 用排除法试 ${probe}`);
+            }
+          }
           if (r && r.answer) {
             answer = r.answer;
             from = r.from;
             confidence = r.confidence;
           }
+          if (!r || !r.answer) dbg.push(`题${q.id} 在线源无答案(bank=${s.from},conf=${s.confidence})`);
         }
         solved.push({
           id: q.id,
@@ -454,6 +481,15 @@ class WorkAgent {
           wrongOptions: this._wrongOptionsFor(q.title),
           guess: this._guessFor(q),
         });
+      }
+
+      // 诊断：把每题的来源打出来，一眼看出是题库答的还是猜的
+      const fromCount = {};
+      solved.forEach((x) => { fromCount[x.from || "none"] = (fromCount[x.from || "none"] || 0) + 1; });
+      if (this.provider) {
+        const st = this.provider.stats || {};
+        log(`     🔎 来源 ${JSON.stringify(fromCount)} | 在线源 online=${this.provider.online} llm=${this.provider.llm && this.provider.llm.enabled} model=${this.provider.llm && this.provider.llm.model} | 云库命中${st.cloudHit || 0} 模型命中${st.llmHit || 0} 调用${st.llmCalls || 0} 失败${st.failed || 0}`);
+        if (dbg.length) log(`     ⚠ ${dbg.slice(0, 3).join("；")}`);
       }
 
       // ② 分数线规划（已知题按区间故意错几道）
@@ -502,7 +538,7 @@ class WorkAgent {
           if (!q) continue;
           const full = res.fullScore / page.questions.length;
           const ratio = full > 0 ? Math.min(1, it.score / full) : 0;
-          A.learn(this.bank, q.title, Number(q.type), it.mine, it.mark, q.options, ratio);
+          A.learn(this.bank, q.title, Number(q.type), it.mine, it.mark, q.options, ratio, it.correct);
           learned++;
         }
         this.saveBank();
@@ -537,7 +573,7 @@ class WorkAgent {
         res.note = "服务端不允许重做：" + rt.msg;
         break;
       }
-      log(`     🔁 ${ctx.title || "测验"} 允许重做，进入第 ${round + 1} 轮`);
+      log(`     🔁 ${ctx.title || "测验"} 允许重做，进入第 ${round + 1} 轮` + (learned ? `（本轮新学 ${learned} 题）` : ""));
       await new Promise((x) => setTimeout(x, 1200));
     }
 
@@ -555,6 +591,23 @@ class WorkAgent {
     const e = A.findEntry(this.bank, title);
     if (!e || !e.wrong) return [];
     return e.wrong.slice();
+  }
+
+  /**
+   * 排除法探针：给这道题挑一个「还没试过、也没被排除」的选项。
+   * 一次只能确定一个选项的真假，所以每轮换一个，几轮就能把四选一收敛成唯一答案。
+   * 返回 "" 表示没得试了（全试过 / 没有选项）。
+   */
+  _probeFor(q) {
+    const keys = Object.keys(q.options || {}).sort();
+    if (!keys.length) return "";
+    const e = A.findEntry(this.bank, String(q.title || ""));
+    const tried = new Set(Object.keys((e && e.tried) || {}).map((x) => String(x).replace(/[^A-Za-z]/g, "").toUpperCase()));
+    const wrong = new Set(((e && e.wrong) || []).map((x) => String(x).toUpperCase()));
+    const candidates = keys.filter((k) => !wrong.has(k) && !tried.has(k));
+    if (!candidates.length) return "";
+    // 判断题只有两个选项，探针也照样有效（答错即可反推另一个是对的）
+    return candidates[0];
   }
 
   /** 未知题的"人类式猜测"：判断题偏"对"，选择题按题干哈希分散（全选 A 一眼就是机器） */

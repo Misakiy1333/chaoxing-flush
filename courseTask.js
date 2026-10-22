@@ -58,6 +58,9 @@ class CourseTask {
             apiKey: this.cfg.llmApiKey || "",
             model: this.cfg.llmModel || "",
             maxCalls: this.cfg.llmMaxCalls == null ? 200 : Number(this.cfg.llmMaxCalls),
+            // 推理模型要给足思考空间，给小了 content 会是空串（实测 96% → 0%）
+            maxTokens: this.cfg.llmMaxTokens == null ? 800 : Number(this.cfg.llmMaxTokens),
+            timeoutMs: this.cfg.llmTimeoutMs == null ? 60000 : Number(this.cfg.llmTimeoutMs),
           },
           // 云端共享题库：先查它，再问大模型
           shared: {
