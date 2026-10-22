@@ -5,79 +5,246 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>超星刷课 · 云端版 · 飞飞</title>
 <style>
+/* ===================== 设计变量 ===================== */
+:root{
+  --bg:#0b131b;
+  --surface:#141f2b;
+  --surface-2:#0e1822;
+  --surface-3:#182736;
+  --line:#20323f;
+  --line-soft:#192833;
+  --txt:#e3ecf3;
+  --txt-dim:#8ba3b5;
+  --txt-faint:#5f7d92;
+  --acc:#4fc3f7;
+  --acc-deep:#1e88e5;
+  --ok:#4caf50;
+  --warn:#ffb300;
+  --bad:#ef5350;
+  --r-sm:7px;
+  --r-md:10px;
+  --r-lg:14px;
+  --sp:14px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:"Microsoft YaHei",system-ui,-apple-system,sans-serif;background:#0f1923;color:#dfe8f0;padding:18px;max-width:1000px;margin:0 auto;-webkit-font-smoothing:antialiased}
-h1{font-size:20px;color:#4fc3f7}
-a{color:#4fc3f7}
-.sub{color:#7b93a7;font-size:12px;margin-bottom:16px}
-.brand{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.by{font-size:11px;color:#4fc3f7;background:#16222e;border:1px solid #2c4a63;border-radius:20px;padding:3px 11px;letter-spacing:.5px}
-.card{background:#16222e;border:1px solid #23384a;border-radius:10px;padding:16px;margin-bottom:14px}
-.card h2{font-size:14px;color:#8fb8d1;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-label{display:block;font-size:12px;color:#7b93a7;margin-bottom:5px}
-input,select{background:#0f1923;border:1px solid #2c4a63;color:#dfe8f0;border-radius:6px;padding:9px 11px;font-size:14px;width:100%;font-family:inherit}
-button{background:#1e88e5;border:none;color:#fff;border-radius:6px;padding:10px 20px;font-size:14px;cursor:pointer;font-family:inherit;transition:.15s}
-button:hover{filter:brightness(1.12)}
-button:disabled{background:#3b5266;cursor:not-allowed;filter:none}
-button.stop{background:#e53935}
-button.ghost{background:transparent;border:1px solid #2c4a63;color:#9fb8ca;padding:7px 14px;font-size:13px}
-button.ghost:hover{border-color:#4fc3f7;color:#4fc3f7}
-/* 顶栏 */
-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-.hdr-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#7b93a7}
-.pill{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:4px 11px;font-size:12px;border:1px solid #2c4a63;background:#0f1923;color:#9fb8ca}
-.pill i{width:7px;height:7px;border-radius:50%;background:#7b93a7;display:inline-block}
-.pill.ok i{background:#66bb6a}.pill.ok{color:#a5d6a7;border-color:#2e5c3a}
-.pill.warn i{background:#ffca28}.pill.warn{color:#ffd54f;border-color:#5c4a1f}
-.pill.cool i{background:#ff9800}.pill.cool{color:#ffb74d;border-color:#5c3d1f}
-.pill.bad i{background:#ef5350}.pill.bad{color:#ef9a9a;border-color:#5c2b2b}
+body{
+  font-family:"Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:radial-gradient(1200px 600px at 50% -10%,#152836 0%,var(--bg) 55%) fixed;
+  color:var(--txt);padding:26px 20px 40px;max-width:1080px;margin:0 auto;
+  -webkit-font-smoothing:antialiased;font-size:14px;line-height:1.6;
+}
+h1{font-size:21px;color:var(--acc);letter-spacing:.3px;font-weight:600}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:4px;padding:1px 5px;font-size:12px;color:#9ad4ef}
+.sub{color:var(--txt-dim);font-size:12.5px;margin-bottom:18px;line-height:1.7}
+.brand{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.by{font-size:11px;color:var(--acc);background:rgba(79,195,247,.08);border:1px solid #2c4a63;border-radius:20px;padding:3px 11px;letter-spacing:.5px}
+
+/* ===================== 卡片 ===================== */
+.card{
+  background:linear-gradient(180deg,var(--surface) 0%,#121d28 100%);
+  border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:18px 20px;margin-bottom:16px;
+  box-shadow:0 1px 3px rgba(0,0,0,.28),0 8px 24px -18px rgba(0,0,0,.6);
+}
+.card h2{
+  font-size:13.5px;color:#a8c8dd;font-weight:600;margin-bottom:14px;
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  padding-bottom:11px;border-bottom:1px solid var(--line-soft);
+}
+.card h2::before{
+  content:"";width:3px;height:13px;border-radius:2px;
+  background:linear-gradient(180deg,var(--acc),var(--acc-deep));flex:none;
+}
+
+/* ===================== 表单 ===================== */
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+label{display:block;font-size:12px;color:var(--txt-dim);margin-bottom:6px;font-weight:500;letter-spacing:.2px}
+input,select{
+  background:var(--surface-2);border:1px solid #274256;color:var(--txt);
+  border-radius:var(--r-sm);padding:10px 12px;font-size:14px;width:100%;
+  font-family:inherit;transition:border-color .15s,box-shadow .15s;
+}
+input:hover,select:hover{border-color:#33556d}
+input:focus,select:focus{
+  outline:none;border-color:var(--acc);
+  box-shadow:0 0 0 3px rgba(79,195,247,.13);
+}
+input::placeholder{color:#4d6577}
+select{cursor:pointer;appearance:none;background-image:linear-gradient(45deg,transparent 50%,#6b8ba0 50%),linear-gradient(135deg,#6b8ba0 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:34px}
+
+/* ===================== 按钮 ===================== */
+button{
+  background:linear-gradient(180deg,#2b9bf0,#1e88e5);border:1px solid #3aa4f6;
+  color:#fff;border-radius:var(--r-sm);padding:10px 20px;font-size:14px;
+  cursor:pointer;font-family:inherit;font-weight:500;transition:.15s;white-space:nowrap;
+}
+button:hover{filter:brightness(1.1);box-shadow:0 2px 10px -2px rgba(30,136,229,.5)}
+button:active{transform:translateY(1px)}
+button:disabled{background:#2a3b49;border-color:#2a3b49;color:#63808f;cursor:not-allowed;filter:none;box-shadow:none;transform:none}
+button.stop{background:linear-gradient(180deg,#f0524f,#e53935);border-color:#f4635f}
+button.stop:hover{box-shadow:0 2px 10px -2px rgba(229,57,53,.5)}
+button.ghost{background:transparent;border:1px solid #2c4a63;color:#9fb8ca;padding:8px 15px;font-size:13px}
+button.ghost:hover{border-color:var(--acc);color:var(--acc);background:rgba(79,195,247,.07);box-shadow:none}
+
+/* ===================== 顶栏 ===================== */
+header{
+  display:flex;justify-content:space-between;align-items:center;gap:14px;
+  flex-wrap:wrap;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--line-soft);
+}
+.hdr-right{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:12px;color:var(--txt-dim)}
+.pill{
+  display:inline-flex;align-items:center;gap:6px;border-radius:20px;padding:5px 12px;
+  font-size:12px;border:1px solid #2c4a63;background:var(--surface-2);color:#9fb8ca;
+  font-weight:500;transition:.2s;
+}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--txt-faint);display:inline-block;flex:none}
+.pill.ok i{background:var(--ok);box-shadow:0 0 7px rgba(76,175,80,.7)}.pill.ok{color:#a5d6a7;border-color:#2e5c3a;background:rgba(76,175,80,.08)}
+.pill.warn i{background:var(--warn);box-shadow:0 0 7px rgba(255,179,0,.7)}.pill.warn{color:#ffd54f;border-color:#5c4a1f;background:rgba(255,179,0,.08)}
+.pill.cool i{background:#ff9800;box-shadow:0 0 7px rgba(255,152,0,.7)}.pill.cool{color:#ffb74d;border-color:#5c3d1f;background:rgba(255,152,0,.08)}
+.pill.bad i{background:var(--bad);box-shadow:0 0 7px rgba(239,83,80,.7)}.pill.bad{color:#ef9a9a;border-color:#5c2b2b;background:rgba(239,83,80,.08)}
 .pill.off i{background:#546e7a}.pill.off{color:#90a4ae}
-/* 统计 */
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px}
-.stat{background:#0f1923;border-radius:9px;padding:12px 10px;text-align:center}
-.stat b{display:block;font-size:22px;color:#4fc3f7;font-variant-numeric:tabular-nums;line-height:1.3}
-.stat span{font-size:11px;color:#7b93a7}
-.stat.green b{color:#66bb6a}.stat.red b{color:#ef5350}.stat.amber b{color:#ffca28}
-/* 进度条 */
-.bar{background:#0a1118;border-radius:20px;height:20px;overflow:hidden;position:relative;margin-top:8px}
-.bar i{display:block;height:100%;background:linear-gradient(90deg,#1e88e5,#4fc3f7);transition:width .4s;border-radius:20px}
-.bar.thin{height:8px}
-.bar.thin i{background:linear-gradient(90deg,#26a69a,#66bb6a)}
-.bar span{position:absolute;inset:0;text-align:center;font-size:12px;line-height:20px;color:#eaf4fb;text-shadow:0 1px 2px rgba(0,0,0,.5)}
-/* 课程网格 */
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
-.course{background:#0f1923;border-radius:9px;padding:13px}
-.course .t{font-size:14px;color:#dfe8f0;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.course .t em{font-style:normal;font-size:12px;color:#7b93a7;white-space:nowrap}
-.course .meta{font-size:11px;color:#7b93a7;margin-top:6px;display:flex;gap:12px;flex-wrap:wrap}
+
+/* ===================== 统计数字 ===================== */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:11px}
+.stat{
+  background:var(--surface-2);border:1px solid var(--line-soft);
+  border-radius:var(--r-md);padding:14px 10px;text-align:center;transition:.18s;
+}
+.stat:hover{border-color:#2c4a63;transform:translateY(-1px)}
+.stat b{display:block;font-size:23px;color:var(--acc);font-variant-numeric:tabular-nums;line-height:1.25;font-weight:600;letter-spacing:-.5px}
+.stat span{font-size:11.5px;color:var(--txt-dim);display:block;margin-top:3px}
+.stat.green b{color:#66bb6a}
+.stat.red b{color:#ef5350}
+.stat.amber b{color:#ffca28}
+
+/* ===================== 进度条 ===================== */
+.bar{
+  background:#080e14;border-radius:20px;height:22px;overflow:hidden;
+  position:relative;margin-top:11px;border:1px solid var(--line-soft);
+}
+.bar i{
+  display:block;height:100%;border-radius:20px;transition:width .45s ease;
+  background:linear-gradient(90deg,#1e88e5,#4fc3f7);
+  box-shadow:0 0 12px rgba(79,195,247,.4);
+}
+.bar.thin{height:8px;margin-top:7px}
+.bar.thin i{background:linear-gradient(90deg,#26a69a,#66bb6a);box-shadow:none}
+.bar span{
+  position:absolute;inset:0;text-align:center;font-size:12px;line-height:22px;
+  color:#eaf4fb;text-shadow:0 1px 3px rgba(0,0,0,.75);font-weight:500;letter-spacing:.3px;
+}
+
+/* ===================== 课程网格 ===================== */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:13px}
+.course{
+  background:var(--surface-2);border:1px solid var(--line-soft);
+  border-radius:var(--r-md);padding:15px;transition:.18s;
+}
+.course:hover{border-color:#2c4a63;background:#101c26}
+.course .t{
+  font-size:14px;color:var(--txt);margin-bottom:9px;display:flex;
+  justify-content:space-between;gap:9px;align-items:baseline;font-weight:500;
+}
+.course .t em{font-style:normal;font-size:12px;color:var(--txt-dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+.course .meta{font-size:11.5px;color:var(--txt-dim);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap}
 .course .meta b{color:#8fb8d1;font-weight:600}
-/* 当前播放 */
-#now .nm{font-size:15px;color:#eaf4fb;margin-bottom:4px;word-break:break-all}
-#now .path{font-size:12px;color:#7b93a7;margin-bottom:10px;word-break:break-all}
-/* 课程选择 */
-.pick{display:flex;align-items:center;gap:10px;background:#0f1923;border-radius:8px;padding:10px 12px;margin:6px 0;cursor:pointer}
-.pick input{width:17px;height:17px;flex:none;cursor:pointer}
+
+/* ===================== 当前播放 ===================== */
+#now .nm{font-size:15px;color:#eaf4fb;margin-bottom:5px;word-break:break-all;font-weight:500;line-height:1.5}
+#now .path{font-size:12px;color:var(--txt-faint);margin-bottom:12px;word-break:break-all}
+
+/* ===================== 课程选择 ===================== */
+.pick{
+  display:flex;align-items:center;gap:11px;background:var(--surface-2);
+  border:1px solid transparent;border-radius:var(--r-sm);padding:11px 13px;
+  margin:7px 0;cursor:pointer;transition:.15s;
+}
+.pick input{width:17px;height:17px;flex:none;cursor:pointer;accent-color:var(--acc-deep)}
 .pick .t{flex:1;font-size:14px}
-.pick:hover{background:#132030}
-/* 风控面板 */
-.risk-line{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:7px 0;border-bottom:1px solid #1b2b39}
+.pick:hover{background:var(--surface-3);border-color:#2c4a63}
+
+/* ===================== 风控 ===================== */
+.risk-line{
+  display:flex;justify-content:space-between;gap:14px;font-size:13.5px;
+  padding:9px 0;border-bottom:1px solid var(--line-soft);
+}
 .risk-line:last-child{border-bottom:none}
-.risk-line span{color:#7b93a7}
-.risk-line b{color:#dfe8f0;font-weight:500}
-.hint{font-size:12px;line-height:1.9;color:#8fb8d1;background:#0f1923;border-left:3px solid #1e88e5;padding:10px 12px;border-radius:0 8px 8px 0;margin-top:12px}
-/* 日志 */
-#log{background:#0a1118;border-radius:8px;height:230px;overflow-y:auto;padding:11px;font:12px/1.75 Consolas,"Courier New",monospace;color:#9fb8ca;white-space:pre-wrap;word-break:break-all}
-#log .ok{color:#66bb6a}#log .err{color:#ef5350}#log .warn{color:#ffca28}
-#msg{font-size:13px;min-height:18px;margin-top:10px}
-.ok-t{color:#66bb6a}.err-t{color:#ef5350}.warn-t{color:#ffca28}
-.foot{margin-top:22px;padding-top:14px;border-top:1px solid #1d2f3f;text-align:center;font-size:12px;color:#5d7488;line-height:1.9}
-.foot b{color:#4fc3f7;font-weight:600}
+.risk-line span{color:var(--txt-dim)}
+.risk-line b{color:var(--txt);font-weight:500;font-variant-numeric:tabular-nums}
+.hint{
+  font-size:12.5px;line-height:1.95;color:#96b9cf;background:var(--surface-2);
+  border-left:3px solid var(--acc-deep);padding:12px 14px;
+  border-radius:0 var(--r-sm) var(--r-sm) 0;margin-top:13px;
+}
+
+/* ===================== 日志 ===================== */
+#log{
+  background:#060b10;border:1px solid var(--line-soft);border-radius:var(--r-md);
+  height:250px;overflow-y:auto;padding:13px 15px;
+  font:12.5px/1.8 Consolas,"Courier New",monospace;color:#93aec1;
+  white-space:pre-wrap;word-break:break-all;
+}
+#log::-webkit-scrollbar{width:9px;height:9px}
+#log::-webkit-scrollbar-track{background:transparent}
+#log::-webkit-scrollbar-thumb{background:#25455c;border-radius:5px;border:2px solid #060b10}
+#log::-webkit-scrollbar-thumb:hover{background:#33607e}
+#log .ok{color:#66bb6a}
+#log .err{color:#ef5350}
+#log .warn{color:#ffca28}
+
+/* ===================== 提示文字 ===================== */
+#msg{font-size:13px;min-height:20px;margin-top:11px;line-height:1.7}
+.ok-t{color:#66bb6a}
+.err-t{color:#ef5350}
+.warn-t{color:#ffca28}
+
+/* ===================== 页脚 ===================== */
+.foot{
+  margin-top:26px;padding-top:18px;border-top:1px solid var(--line-soft);
+  text-align:center;font-size:12px;color:var(--txt-faint);line-height:2;
+}
+.foot b{color:var(--acc);font-weight:600}
 .hide{display:none!important}
-@media(max-width:560px){
-  body{padding:12px}
-  .stat b{font-size:19px}
-  .hdr-right{font-size:11px}
+
+/* ===================== 说明区（登录页）===================== */
+.tips{font-size:12.5px;color:var(--txt-dim);line-height:2.15}
+.tips b{color:#8fb8d1;display:inline-block;margin-bottom:7px;font-size:13px}
+.tips li{margin-left:16px;padding-left:2px}
+
+/* ===================== 折叠区块 ===================== */
+details{
+  margin-top:15px;padding-top:14px;border-top:1px solid var(--line-soft);
+}
+details summary{
+  cursor:pointer;font-size:13px;color:#8fb8d1;font-weight:500;
+  list-style:none;display:flex;align-items:center;gap:8px;
+  padding:3px 0;transition:color .15s;user-select:none;
+}
+details summary::-webkit-details-marker{display:none}
+details summary::before{
+  content:"▸";display:inline-block;transition:transform .2s;
+  color:var(--acc);font-size:11px;
+}
+details[open] summary::before{transform:rotate(90deg)}
+details summary:hover{color:var(--acc)}
+
+/* ===================== 分隔行 ===================== */
+.sep{margin-top:15px;padding-top:15px;border-top:1px solid var(--line-soft)}
+.note{font-size:12px;color:var(--txt-faint);margin-top:10px;line-height:1.9}
+
+/* ===================== 响应式 ===================== */
+@media(max-width:640px){
+  body{padding:16px 12px 30px;font-size:13.5px}
+  .card{padding:15px 14px;border-radius:var(--r-md)}
+  .stat b{font-size:20px}
+  .stats{grid-template-columns:repeat(auto-fit,minmax(94px,1fr));gap:8px}
+  .hdr-right{font-size:11px;gap:7px}
+  header{gap:10px}
+  h1{font-size:18px}
+  .grid{grid-template-columns:1fr}
+  button{padding:10px 16px}
 }
 </style>
 </head>
@@ -92,33 +259,38 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
   <div class="sub" id="subLine">正在识别运行环境…</div>
 
   <div class="card">
+    <h2>登录账号</h2>
     <div class="row">
-      <div style="flex:1;min-width:165px"><label>手机号 / 学号</label><input id="uname" placeholder="超星账号" autocomplete="username"></div>
-      <div style="flex:1;min-width:165px"><label>密码</label><input id="password" type="password" placeholder="密码" autocomplete="current-password"></div>
-      <div style="min-width:110px"><label>学校ID（可留空）</label><input id="fid" placeholder="多数留空"></div>
-      <div style="min-width:190px"><label>代理（可留空）</label><input id="proxy" placeholder="http://ip:port"></div>
+      <div style="flex:1;min-width:170px"><label>手机号 / 学号</label><input id="uname" placeholder="超星账号" autocomplete="username"></div>
+      <div style="flex:1;min-width:170px"><label>密码</label><input id="password" type="password" placeholder="密码" autocomplete="current-password"></div>
+      <div style="min-width:120px"><label>学校 ID（可留空）</label><input id="fid" placeholder="多数留空"></div>
+      <div style="min-width:200px"><label>代理（可留空）</label><input id="proxy" placeholder="http://ip:port"></div>
       <button id="loginBtn">登录</button>
     </div>
     <div id="msg"></div>
   </div>
 
-  <div class="card" style="font-size:12px;color:#7b93a7;line-height:2">
-    <b style="color:#8fb8d1">说明</b><br>
-    · 登录一次后 30 天内免登录，刷新页面或服务器重启都不用重新输密码<br>
-    · 每个账号的数据独立存放，互相看不到<br>
-    · 刷课有拟人化节奏（章节间隔 3~8 秒、每 20 章小憩、单线 1 倍速），不要调快<br>
-    · 启动后会先扫描一遍：已经刷完的章节直接跳过，不再白等节奏<br>
-    · 默认 24 小时全天可刷、单线；想限时就到「控制」里改并保存<br>
-    · 本项目已开源：<a href="https://github.com/Misakiy1333/chaoxing-flush" target="_blank" rel="noopener" style="color:#7fd4ff">github.com/Misakiy1333/chaoxing-flush</a>
+  <div class="card">
+    <h2>使用说明</h2>
+    <div class="tips">
+      <ul>
+        <li>登录一次后 <b style="color:#8fb8d1">30 天内免登录</b>，刷新页面或服务器重启都不用重新输密码</li>
+        <li>每个账号的数据独立存放，互相看不到</li>
+        <li>刷课有拟人化节奏（章节间隔 3~8 秒、每 20 章小憩、单线 1 倍速），<b style="color:#ffca28">不要调快</b></li>
+        <li>启动后会先扫描一遍：已经刷完的章节直接跳过，不再白等节奏</li>
+        <li>默认 24 小时全天可刷、单线；想限时就到「控制」里改并保存</li>
+        <li>本项目已开源：<a href="https://github.com/Misakiy1333/chaoxing-flush" target="_blank" rel="noopener">github.com/Misakiy1333/chaoxing-flush</a></li>
+      </ul>
+    </div>
   </div>
 
   <!-- 登录页也能直接下载本地版 -->
   <div class="card" id="updCardLogin" style="display:none;border-color:#2e5c3a">
     <h2>📦 <span id="updTitleLogin">下载本地版</span></h2>
     <div style="font-size:13px;color:#a8c4d8;line-height:1.9" id="updBodyLogin"></div>
-    <div style="margin-top:11px">
+    <div style="margin-top:13px">
       <a id="updLinkLogin" href="#" target="_blank" rel="noopener"
-         style="display:inline-block;background:#1e88e5;color:#fff;padding:9px 20px;border-radius:6px;text-decoration:none;font-size:14px">前往下载</a>
+         style="display:inline-block;background:linear-gradient(180deg,#2b9bf0,#1e88e5);color:#fff;padding:10px 22px;border-radius:7px;text-decoration:none;font-size:14px;font-weight:500">前往下载</a>
     </div>
   </div>
 </div>
@@ -126,13 +298,13 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
 <!-- ============ 主界面 ============ -->
 <div id="app" class="hide">
   <!-- 云端公告：本地版和云端都会收到 -->
-  <div id="noticeBar" class="hide" style="margin:12px 18px 0;padding:10px 14px;border:1px solid #24506b;border-left:3px solid #4aa8e0;border-radius:8px;background:#0d1c26">
+  <div id="noticeBar" class="hide" style="margin:0 0 16px;padding:12px 16px;border:1px solid #24506b;border-left:3px solid #4aa8e0;border-radius:0 10px 10px 0;background:linear-gradient(90deg,rgba(13,28,38,.95),rgba(13,28,38,.6))">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
       <strong id="noticeTitle" style="font-size:13px;color:#bfe4ff">更新公告</strong>
       <span style="font-size:12px;color:#5f7d92"><span id="noticeDate"></span>
         <a href="#" id="noticeClose" style="color:#5f7d92;margin-left:10px">收起</a></span>
     </div>
-    <ul id="noticeItems" style="margin:7px 0 0;padding-left:18px;font-size:12.5px;color:#9fbdd0;line-height:1.7"></ul>
+    <ul id="noticeItems" style="margin:8px 0 0;padding-left:18px;font-size:12.5px;color:#9fbdd0;line-height:1.8"></ul>
   </div>
   <header>
     <div class="brand">
@@ -144,7 +316,7 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
       <span id="riskPill" class="pill ok"><i></i>风控正常</span>
       <span id="who"></span>
       <a id="adminBtn" class="hide" href="/admin" target="_blank" rel="noopener"
-         style="border:1px solid #2c4a63;border-radius:6px;padding:7px 14px;font-size:13px;color:#7fd4ff;text-decoration:none">🛠 管理后台</a>
+         style="border:1px solid #2c4a63;border-radius:7px;padding:8px 15px;font-size:13px;color:#7fd4ff;text-decoration:none;transition:.15s">🛠 管理后台</a>
       <button class="ghost" id="logoutBtn">退出</button>
     </div>
   </header>
@@ -152,21 +324,22 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
   <div class="card" id="updCard" style="display:none;border-color:#2e5c3a">
     <h2>📦 <span id="updTitle">有新版本</span></h2>
     <div style="font-size:13px;color:#a8c4d8;line-height:1.9" id="updBody"></div>
-    <div style="margin-top:11px">
+    <div style="margin-top:13px">
       <a id="updLink" href="#" target="_blank" rel="noopener"
-         style="display:inline-block;background:#1e88e5;color:#fff;padding:9px 20px;border-radius:6px;text-decoration:none;font-size:14px">前往下载</a>
+         style="display:inline-block;background:linear-gradient(180deg,#2b9bf0,#1e88e5);color:#fff;padding:10px 22px;border-radius:7px;text-decoration:none;font-size:14px;font-weight:500">前往下载</a>
     </div>
   </div>
 
   <div class="card" id="annCard" style="display:none">
     <h2>📢 <span id="annTitle">更新公告</span>
-      <span id="annDate" style="font-size:11px;color:#5d7488;font-weight:400"></span>
-      <button class="ghost" id="annClose" style="margin-left:auto;padding:3px 11px;font-size:12px">知道了</button>
+      <span id="annDate" style="font-size:11.5px;color:#5d7488;font-weight:400;margin-left:2px"></span>
+      <button class="ghost" id="annClose" style="margin-left:auto;padding:4px 12px;font-size:12px">知道了</button>
     </h2>
-    <div id="annBody" style="font-size:13px;line-height:2;color:#a8c4d8"></div>
+    <div id="annBody" style="font-size:13px;line-height:2.05;color:#a8c4d8"></div>
   </div>
 
   <div class="card">
+    <h2>运行总览</h2>
     <div class="stats">
       <div class="stat"><b id="sState">-</b><span>状态</span></div>
       <div class="stat"><b id="sUsed">0:00</b><span>今日已刷</span></div>
@@ -181,11 +354,11 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
   <!-- 控制 -->
   <div class="card">
     <h2>控制</h2>
-    <div class="row" style="margin-bottom:12px">
+    <div class="row" style="margin-bottom:4px">
       <button id="startBtn">▶ 开始刷课</button>
       <button class="stop" id="stopBtn" disabled>⏹ 停止</button>
       <button class="ghost" id="pickToggle">选择课程</button>
-      <span id="ctrlMsg" style="font-size:12px;color:#7b93a7"></span>
+      <span id="ctrlMsg" style="font-size:12px;color:#7b93a7;padding-bottom:9px"></span>
     </div>
 
     <div id="pickBox" class="hide">
@@ -197,78 +370,78 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
       <div id="coursePick"></div>
     </div>
 
-    <div class="row" style="margin-top:14px;padding-top:14px;border-top:1px solid #1b2b39">
-      <div style="min-width:110px"><label>每日时长（小时，24=不限）</label><input id="setHours" type="number" min="0" max="24" step="1"></div>
-      <div style="min-width:100px"><label>开始时段</label><input id="setStart" type="number" min="0" max="23"></div>
-      <div style="min-width:100px"><label>结束时段</label><input id="setEnd" type="number" min="1" max="24"></div>
+    <div class="row sep">
+      <div style="min-width:120px"><label>每日时长（小时，24=不限）</label><input id="setHours" type="number" min="0" max="24" step="1"></div>
+      <div style="min-width:110px"><label>开始时段</label><input id="setStart" type="number" min="0" max="23"></div>
+      <div style="min-width:110px"><label>结束时段</label><input id="setEnd" type="number" min="1" max="24"></div>
       <button class="ghost" id="saveSet">保存设置</button>
     </div>
 
     <!-- 章节测验 / 作业 与正确率区间 -->
-    <div class="row" style="margin-top:14px;padding-top:14px;border-top:1px solid #1b2b39;align-items:flex-end">
-      <div style="min-width:120px">
-        <label>自动做章节测验/作业</label>
-        <select id="setWorkOn" style="width:100%;background:#0e1a24;color:#dce7f0;border:1px solid #1b2b39;border-radius:8px;padding:8px">
+    <div class="row sep">
+      <div style="min-width:130px">
+        <label>自动做章节测验 / 作业</label>
+        <select id="setWorkOn">
           <option value="1">开启（自动交卷）</option>
           <option value="0">关闭（只刷视频）</option>
         </select>
       </div>
-      <div style="min-width:88px"><label>正确率下限 %</label><input id="setAccMin" type="number" min="0" max="100" step="1" value="80"></div>
-      <div style="min-width:88px"><label>正确率上限 %</label><input id="setAccMax" type="number" min="0" max="100" step="1" value="100"></div>
+      <div style="min-width:92px"><label>正确率下限 %</label><input id="setAccMin" type="number" min="0" max="100" step="1" value="80"></div>
+      <div style="min-width:92px"><label>正确率上限 %</label><input id="setAccMax" type="number" min="0" max="100" step="1" value="100"></div>
       <button class="ghost" id="saveSet2">保存正确率</button>
     </div>
-    <div style="font-size:12px;color:#7b93a7;margin-top:9px">
-      分数会尽量落在上面这个区间（默认 80%~90%）：会的题故意错几道把总分压下去，不会的题按题型猜对概率折算。
+    <div class="note">
+      分数会尽量落在上面这个区间（默认 80%~100%）：会的题故意错几道把总分压下去，不会的题按题型猜对概率折算。
       设 100/100 就是“能答对的全答对”。题量太少时（每题 25 分以上）区间可能压不进去，会取离区间最近的分数。
     </div>
-    <div id="accHint" style="font-size:12px;color:#7b93a7;margin-top:6px"></div>
+    <div id="accHint" class="note"></div>
 
     <!-- 答题源：云端题库 → 外部题库接口 → 大模型 -->
-    <details style="margin-top:14px;padding-top:12px;border-top:1px solid #1b2b39">
-      <summary style="cursor:pointer;font-size:13px;color:#8fb8d1">答题源设置（不会的题问谁）<span id="srcState" style="font-size:12px;color:#7b93a7"></span></summary>
-      <div style="font-size:12px;color:#7b93a7;margin:9px 0">
+    <details>
+      <summary>答题源设置（不会的题问谁）<span id="srcState" style="font-size:12px;color:#7b93a7;font-weight:400"></span></summary>
+      <div class="note" style="margin:11px 0">
         顺序：云端共享题库（所有账号答过的题都在里面）→ 外部题库接口 → 大模型。答过的题自动写回云端，越刷越准、越刷越省。
       </div>
-      <div id="bankHint" style="font-size:12px;color:#8fb8d1;margin-bottom:8px"></div>
+      <div id="bankHint" style="font-size:12px;color:#8fb8d1;margin-bottom:10px"></div>
 
-      <div class="row" style="align-items:flex-end">
-        <div style="min-width:120px">
+      <div class="row">
+        <div style="min-width:130px">
           <label>题库接口</label>
-          <select id="setRemoteOn" style="width:100%;background:#0e1a24;color:#dce7f0;border:1px solid #1b2b39;border-radius:8px;padding:8px">
+          <select id="setRemoteOn">
             <option value="0">关闭</option>
             <option value="1">开启</option>
           </select>
         </div>
-        <div style="flex:1;min-width:220px"><label>接口地址（POST，兼容 OCS AnswererWrapper）</label><input id="setRemoteUrl" placeholder="https://example.com/api/answer" autocomplete="off"></div>
-        <div style="min-width:150px"><label>Token（可选）</label><input id="setRemoteToken" type="password" placeholder="留空=不修改" autocomplete="new-password"></div>
+        <div style="flex:1;min-width:230px"><label>接口地址（POST，兼容 OCS AnswererWrapper）</label><input id="setRemoteUrl" placeholder="https://example.com/api/answer" autocomplete="off"></div>
+        <div style="min-width:155px"><label>Token（可选）</label><input id="setRemoteToken" type="password" placeholder="留空=不修改" autocomplete="new-password"></div>
       </div>
 
-      <div class="row" style="align-items:flex-end;margin-top:10px">
-        <div style="min-width:120px">
+      <div class="row" style="margin-top:12px">
+        <div style="min-width:130px">
           <label>大模型</label>
-          <select id="setLlmOn" style="width:100%;background:#0e1a24;color:#dce7f0;border:1px solid #1b2b39;border-radius:8px;padding:8px">
+          <select id="setLlmOn">
             <option value="0">关闭</option>
             <option value="1">开启</option>
           </select>
         </div>
-        <div style="flex:1;min-width:220px"><label>BaseURL（OpenAI 兼容）</label><input id="setLlmBase" placeholder="https://open.bigmodel.cn/api/paas/v4" autocomplete="off"></div>
-        <div style="min-width:180px"><label>模型名</label><input id="setLlmModel" placeholder="glm-4-flash" autocomplete="off"></div>
+        <div style="flex:1;min-width:230px"><label>BaseURL（OpenAI 兼容）</label><input id="setLlmBase" placeholder="https://open.bigmodel.cn/api/paas/v4" autocomplete="off"></div>
+        <div style="min-width:190px"><label>模型名</label><input id="setLlmModel" placeholder="glm-4-flash" autocomplete="off"></div>
       </div>
 
-      <div class="row" style="align-items:flex-end;margin-top:10px">
-        <div style="flex:1;min-width:240px"><label>API Key</label><input id="setLlmKey" type="password" placeholder="留空=不修改" autocomplete="new-password"></div>
-        <div style="min-width:130px"><label>每次运行最多调用</label><input id="setLlmMax" type="number" min="0" max="2000" step="10" value="200"></div>
+      <div class="row" style="margin-top:12px">
+        <div style="flex:1;min-width:250px"><label>API Key</label><input id="setLlmKey" type="password" placeholder="留空=不修改" autocomplete="new-password"></div>
+        <div style="min-width:140px"><label>每次运行最多调用</label><input id="setLlmMax" type="number" min="0" max="2000" step="10" value="200"></div>
         <button class="ghost" id="saveSet3">保存答题源</button>
       </div>
-      <div style="font-size:12px;color:#7b93a7;margin-top:9px">免费可用：智谱 <code>https://open.bigmodel.cn/api/paas/v4</code> + <code>glm-4-flash</code>（注册送，推荐）｜硅基流动 <code>https://api.siliconflow.cn/v1</code> + <code>Qwen/Qwen2.5-72B-Instruct</code>｜DeepSeek <code>https://api.deepseek.com/v1</code> + <code>deepseek-chat</code></div>
-      <div id="srcHint" style="font-size:12px;color:#7b93a7;margin-top:9px"></div>
+      <div class="note">免费可用：智谱 <code>https://open.bigmodel.cn/api/paas/v4</code> + <code>glm-4-flash</code>（注册送，推荐）｜硅基流动 <code>https://api.siliconflow.cn/v1</code> + <code>Qwen/Qwen2.5-72B-Instruct</code>｜DeepSeek <code>https://api.deepseek.com/v1</code> + <code>deepseek-chat</code></div>
+      <div id="srcHint" class="note"></div>
     </details>
 
-    <div id="worksBox" class="hide" style="margin-top:12px">
-      <div style="font-size:12px;color:#7b93a7;margin-bottom:6px">最近交卷</div>
+    <div id="worksBox" class="hide" style="margin-top:15px;padding-top:14px;border-top:1px solid #192833">
+      <div style="font-size:12px;color:#7b93a7;margin-bottom:8px">最近交卷</div>
       <div id="worksList"></div>
     </div>
-    <div id="cfgHint" style="font-size:12px;color:#7b93a7;margin-top:9px"></div>
+    <div id="cfgHint" class="note"></div>
   </div>
 
   <!-- 当前播放 -->
