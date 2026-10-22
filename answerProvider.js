@@ -215,7 +215,19 @@ class AnswerProvider {
   /** 把本地题库推回云端（答题/批阅后调用，服务端按可信度合并） */
   async pushShared() {
     if (!this.shared.enabled || !this.shared.url) return 0;
-    const entries = this.bank.entries || {};
+    const all = this.bank.entries || {};
+    // 只推有用的条目：自检残留（没有 q 字段的假题）、空条目一律不推；
+    // type 缺失的按 0（单选）补齐，避免云端出现 type:null 的脏数据
+    const entries = {};
+    for (const k of Object.keys(all)) {
+      const e = all[k];
+      if (!e || typeof e !== "object") continue;
+      if (!e.q && !e.correct && !e.guess) continue;
+      const clean = Object.assign({}, e);
+      if (clean.type == null) clean.type = 0;
+      if (!clean.q) clean.q = k;
+      entries[k] = clean;
+    }
     const n = Object.keys(entries).length;
     if (!n) return 0;
     try {

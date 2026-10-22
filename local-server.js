@@ -344,6 +344,9 @@ class LocalServer {
           key: (cloud && cloud.bank && cloud.bank.key) || this.cfg.sharedBankKey || "shared",
           total: (cloud && cloud.bank && cloud.bank.total) || 0,
           enabled: !!base,
+          // 本地版有没有配大模型（看本机配置，不是云端的）
+          llmEnabled: !!(this.cfg.llmEnabled === true && this.cfg.llmApiKey),
+          llmModel: (this.cfg.llmEnabled === true && this.cfg.llmApiKey) ? (this.cfg.llmModel || "") : "",
         },
         cloud: cloud
           ? {

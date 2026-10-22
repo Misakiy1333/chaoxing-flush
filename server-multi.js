@@ -112,9 +112,15 @@ function mergeSharedBank(inc) {
   const rank = (e) => (e && e.correct ? 3 : e && e.guess ? 2 : e && (e.wrong || e.members) ? 1 : 0);
   let added = 0;
   let updated = 0;
+  let skipped = 0;
   for (const k of Object.keys(inc)) {
-    const e = inc[k];
-    if (!e || !k) continue;
+    const raw = inc[k];
+    if (!raw || !k || typeof raw !== "object") { skipped++; continue; }
+    // 清洗：自检/空条目不留；type 缺失补 0；q 缺失用关键词兜底
+    if (!raw.q && !raw.correct && !raw.guess && !raw.wrong) { skipped++; continue; }
+    const e = Object.assign({}, raw);
+    if (e.type == null) e.type = 0;
+    if (!e.q) e.q = k;
     const old = bank.entries[k];
     if (!old) {
       bank.entries[k] = e;
@@ -133,7 +139,7 @@ function mergeSharedBank(inc) {
     }
   }
   saveSharedBankSoon();
-  return { total: Object.keys(bank.entries).length, added, updated };
+  return { total: Object.keys(bank.entries).length, added, updated, skipped };
 }
 if (!fs.existsSync(RELEASE_DIR)) fs.mkdirSync(RELEASE_DIR, { recursive: true });
 
@@ -554,7 +560,7 @@ function handle(req, res) {
           json({ ok: false, error: "合并失败：" + (e && e.message) }, 500);
           return;
         }
-        json({ ok: true, total: r.total, added: r.added, updated: r.updated });
+        json({ ok: true, total: r.total, added: r.added, updated: r.updated, skipped: r.skipped || 0 });
       });
       return;
     }

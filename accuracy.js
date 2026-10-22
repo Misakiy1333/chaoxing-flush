@@ -111,9 +111,12 @@ function plan(opts) {
   const known = [];
   const unknown = [];
   for (const q of questions) {
-    // 置信度低的答案（大模型猜的、题库模糊匹配的）按"不确定"处理，不能当已掌握
+    // 只有「题库里确认过的答案」（置信度 1）才算已掌握。
+    // 大模型/在线题库给的答案会错（实测 3 题卷以为满分、实际 66.6），
+    // 之前用 0.7 阈值把它当已知，压分计划直接崩，所以这里收紧到 1。
     const conf = q && q.confidence == null ? 1 : Number(q.confidence);
-    if (q && q.answer && conf >= 0.7) known.push(q);
+    const trusted = q && q.from === "provider" ? false : conf >= 1 - 1e-9;
+    if (q && q.answer && trusted) known.push(q);
     else unknown.push(q);
   }
   out.knownCount = known.length;
@@ -129,7 +132,8 @@ function plan(opts) {
   let expectedUnknown = 0;
   for (const q of unknown) {
     const conf = Number(q.confidence);
-    const p = conf > 0 && conf < 0.7 ? conf : GUESS_PROB[Number(q.type)];
+    // 有答案就按它的置信度算（大模型 0.85 就按 85% 可能对）；纯瞎猜才用题型概率
+    const p = q && q.answer && conf > 0 ? conf : GUESS_PROB[Number(q.type)];
     expectedUnknown += pointsPer * (p == null ? 0.2 : p);
   }
 
@@ -146,7 +150,7 @@ function plan(opts) {
     let sum = 0;
     for (const q of unknown) {
       const conf = Number(q.confidence);
-      const p = conf > 0 && conf < 0.7 ? conf : GUESS_PROB[Number(q.type)];
+      const p = q && q.answer && conf > 0 ? conf : GUESS_PROB[Number(q.type)];
       sum += p == null ? 0.2 : p;
     }
     pUnknown = sum / unknown.length;

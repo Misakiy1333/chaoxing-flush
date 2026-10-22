@@ -630,9 +630,26 @@ function group(title) {
       { id: "3", type: 1, answer: "AB", confidence: 0.6, options: { A: "甲", B: "乙", C: "丙" } },
     ];
     const p = Acc.plan({ questions: qs, fullScore: 100, min: 80, max: 90, seed: 1 });
-    assert.strictEqual(p.knownCount, 2, "大模型答案(0.8)算已知，多选半截答案(0.6)不算");
-    assert.strictEqual(p.unknownCount, 1);
+    // 只有题库确认过(conf=1)的才算已掌握；大模型答的(0.8)以前被当已知，
+    // 结果 3 题卷以为满分、实际 66.6，所以现在收紧为"必须 1"
+    assert.strictEqual(p.knownCount, 1, "只有 conf=1 的算已知");
+    assert.strictEqual(p.unknownCount, 2);
     assert.strictEqual(p.plan["3"], "AB", "低置信度答案仍然照它交");
+  });
+
+  await ta("大模型答的题不算已知（守卫 66.6 分那类事故）", async () => {
+    // 真实事故：3 题卷，压分器以为 3 道全已知 → 目标 100 分不压分，
+    // 实际有 1 道是大模型猜的且猜错 → 只考 66.6，掉出区间。
+    const qs = [
+      { id: "1", type: 0, answer: "A", from: "bank", confidence: 1, options: { A: "甲", B: "乙" } },
+      { id: "2", type: 0, answer: "B", from: "bank", confidence: 1, options: { A: "甲", B: "乙" } },
+      { id: "3", type: 0, answer: "C", from: "provider", confidence: 0.85, options: { A: "甲", B: "乙", C: "丙" } },
+    ];
+    const p = Acc.plan({ questions: qs, fullScore: 100, min: 80, max: 100, seed: 5 });
+    assert.strictEqual(p.knownCount, 2, "只有题库确认的 2 道算已知");
+    assert.strictEqual(p.unknownCount, 1, "大模型那道算未知");
+    assert.ok(p.expected >= 80, "预估分要落进区间，实际 " + p.expected);
+    assert.ok(p.probInRange > 0.8, "落区间概率应较高，实际 " + p.probInRange);
   });
 
   await ta("按「落区间概率」选方案，而不是按期望分", async () => {
@@ -646,9 +663,10 @@ function group(title) {
     assert.strictEqual(p1.expected, 80);
     assert.ok(p1.probInRange > 0.99, "全已知应 100% 落区间");
 
-    // 大模型答的也算已知，否则会一路满分
+    // 大模型答的(0.8)不算已知：不主动压分，靠它自己可能错的那 20% 自然落区间
     const p2 = go([1, 2, 3, 4, 5].map((i) => mk(i, 0.8)));
-    assert.strictEqual(p2.missed.length, 1);
+    assert.strictEqual(p2.knownCount, 0, "大模型答案不计入已知，避免压分计划被它带崩");
+    assert.strictEqual(p2.missed.length, 0);
 
     // 4 已知 + 1 未知（单选 25%）：不压分，靠未知题自然掉分更稳
     const p3 = go([1, 2, 3, 4].map((i) => mk(i)).concat([mkU(5)]));

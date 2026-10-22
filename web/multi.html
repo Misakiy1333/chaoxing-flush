@@ -357,7 +357,19 @@ async function loadVersion(){
     renderUpdate();
     renderAnnounce();
     renderVersionLine();
+    renderBankHint(ver.bank);
   }catch(e){}
+}
+/** 云端题库连接状态：登录前后都能看到，不用等 /api/state */
+function renderBankHint(b){
+  if(!$("bankHint")) return;
+  if(!b || !b.url){
+    $("bankHint").textContent = "云端题库：未配置（本地版会在能连上云端时自动接入）";
+    return;
+  }
+  var n = b.total || 0;
+  $("bankHint").textContent = "云端题库：" + (n ? n + " 题" : "已连接，暂无条目") +
+    "　（" + b.url + "）" + (b.llmEnabled ? "　· 大模型 " + (b.llmModel || "已开启") : "　· 大模型未配置");
 }
 function renderAnnounce(){
   var a = ver.announcement;
