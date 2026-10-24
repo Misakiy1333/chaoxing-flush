@@ -35,3 +35,8 @@ verifycode.png
 Thumbs.db
 desktop.ini
 sea-config.json
+# 题库副本 / 备份（含真实题目数据，不入库）
+bank-test.json
+quizbank.backup-*.json
+quizbank.json
+data/bank-shared.backup-*.json
