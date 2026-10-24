@@ -100,6 +100,27 @@ function similarity(a, b) {
   return 1 - d / Math.max(m, n);
 }
 
+/* ------------------------------------------------- 同题判定：阈值 + 否定词守卫 */
+
+/**
+ * 相似题阈值。原来是 0.6，太松：中文长句改一两个字仍然能到 0.95，
+ * 「不属于…」和「属于…」只差一个字、相似度 0.947，答案却完全相反。
+ * 0.85 配合下面的否定词守卫，才敢用于「直接套用题库答案」。
+ */
+const SAME_QUESTION_THRESHOLD = 0.85;
+
+/** 否定/排他/反向词：出现与否往往决定答案完全相反 */
+const NEG_PATTERN = /不|没有|不能|不应|不得|非|无|除|错误|禁止|未必|否/;
+
+/**
+ * 两道题的否定极性是否不同。
+ * 「以下选项中[不]属于…」vs「以下选项中属于…」相似度 0.95，
+ * 只靠编辑距离无法区分，必须单独拦掉。
+ */
+function negMismatch(a, b) {
+  return NEG_PATTERN.test(normalize(a)) !== NEG_PATTERN.test(normalize(b));
+}
+
 /* ------------------------------------------------------------------ 判断题 */
 
 const TRUE_WORDS = ["是", "对", "正确", "√", "t", "true", "1", "yes", "y", "对的", "正确的"];
@@ -255,23 +276,146 @@ function rememberOptions(bank, question, options) {
 }
 
 /** 在题库里找同题（先精确，再相似度） */
-function findEntry(bank, question, threshold) {
-  const th = threshold == null ? 0.6 : threshold;
+function findEntryEx(bank, question, threshold) {
+  const th = threshold == null ? SAME_QUESTION_THRESHOLD : threshold;
   const k = qkey(question);
-  if (bank.entries[k]) return bank.entries[k];
+  if (bank.entries[k]) return { entry: bank.entries[k], score: 1, fuzzy: false };
   let best = null;
   let bestScore = 0;
   for (const key of Object.keys(bank.entries)) {
     const e = bank.entries[key];
     if (!e || !e.q) continue;
+    // 否定极性不同的一律不算同题（「不属于」≠「属于」）
+    if (negMismatch(question, e.q)) continue;
     const s = similarity(question, e.q);
     if (s > bestScore) {
       bestScore = s;
       best = e;
     }
   }
-  return bestScore >= th ? best : null;
+  if (bestScore >= th) return { entry: best, score: bestScore, fuzzy: true };
+  return { entry: null, score: bestScore, fuzzy: false };
 }
+
+/** 在题库里找同题，只要条目 */
+function findEntry(bank, question, threshold) {
+  return findEntryEx(bank, question, threshold).entry;
+}
+
+/* --------------------------------------- 答案与选项文本：双向换算（防选项乱序） */
+
+/**
+ * 字母 → 选项文本。这就是修「选项乱序答错」的关键：
+ * 光存 "A" 没意义，下次选项一换位置 A 就不是原来那个答案了。
+ */
+function lettersToText(letters, options) {
+  const out = [];
+  const keys = Object.keys(options || {});
+  if (!keys.length) return out;
+  for (const L of letters || []) {
+    const t = options[L];
+    if (t == null) continue;
+    const v = String(t).replace(/\s+/g, " ").trim();
+    if (v) out.push(v.slice(0, 200));
+  }
+  return out;
+}
+
+/**
+ * 选项文本 → 本次页面的字母。顺序变了也能对上。
+ * 找不到就返回空数组，调用方应退回字母答案或换用其它策略。
+ */
+function resolveByText(texts, options) {
+  const keys = Object.keys(options || {}).sort();
+  if (!keys.length || !texts || !texts.length) return [];
+  const pool = [];
+  for (const k of keys) {
+    const t = normalize(options[k]);
+    if (t) pool.push({ k, t });
+  }
+  if (!pool.length) return [];
+  const out = new Set();
+  for (const raw of texts) {
+    const nt = normalize(raw);
+    if (!nt) continue;
+    // ① 完全一致
+    const exact = pool.filter((o) => o.t === nt);
+    if (exact.length === 1) {
+      out.add(exact[0].k);
+      continue;
+    }
+    if (exact.length > 1) {
+      // 多个选项文本相同（题库里"A"和"D"内容一模一样，或归一化后撞车：
+      // "−103" 与 "10.3" 都会变成 "103"）→ 无法靠文本判断，跳过，
+      // 让调用方退回字母答案，避免一次选了 2 个选项。
+      continue;
+    }
+    // ② 一方包含另一方（选项文本被截断 / 多了标点）
+    const part = pool.filter((o) => o.t.includes(nt) || nt.includes(o.t));
+    if (part.length === 1) {
+      out.add(part[0].k);
+      continue;
+    }
+    // ③ 高阈值相似兜底，宁可不答也不乱答
+    let best = null;
+    let bestS = 0;
+    let tie = 0;
+    for (const o of pool) {
+      const s = similarity(o.t, nt);
+      if (s > bestS) {
+        bestS = s;
+        best = o;
+        tie = 1;
+      } else if (s === bestS) {
+        tie++;
+      }
+    }
+    // 并列第一也不选，避免歧义
+    if (best && bestS >= 0.9 && tie === 1) out.add(best.k);
+  }
+  return Array.from(out).sort();
+}
+
+/**
+ * 写入"已确认正确答案"：同时存字母和选项文本。
+ * 字母给老版本兼容，文本给新版本防乱序。
+ */
+function setCorrect(e, letters, options) {
+  const arr = (Array.isArray(letters) ? letters : String(letters == null ? "" : letters).split(""))
+    .map((x) => String(x).trim())
+    .filter(Boolean);
+  const uniq = Array.from(new Set(arr)).sort();
+  e.correct = uniq.join("");
+  const txt = lettersToText(uniq, options);
+  if (txt.length) e.correctText = txt;
+  else delete e.correctText;
+  return e;
+}
+
+/**
+ * 判断题专用：存布尔而不是字母。
+ * A=对 B=错 只是学习通的显示约定，存布尔才彻底不怕顺序/文案变化。
+ */
+function setCorrectBool(e, bool) {
+  e.correctBool = bool === true;
+  e.correct = bool === true ? "A" : "B";
+  return e;
+}
+
+/** 多选已确认成员：字母 + 文本双写 */
+function addMembers(e, letters, options) {
+  const add = (letters || []).filter(Boolean);
+  if (!add.length) return e;
+  const cur = new Set(e.members || []);
+  add.forEach((L) => cur.add(L));
+  e.members = Array.from(cur).sort();
+  const txt = new Set(e.memberText || []);
+  lettersToText(add, options).forEach((t) => txt.add(t));
+  if (txt.size) e.memberText = Array.from(txt);
+  return e;
+}
+
+/* ------------------------------------------------------------------ 学习 */
 
 /**
  * 记录一次作答结果（学习）
@@ -312,14 +456,14 @@ function learn(bank, question, type, myAnswer, mark, options, ratio, correctAnsw
     if (type === 3) {
       const b = toBool(direct);
       if (b != null) {
-        e.correct = b === true ? "A" : "B";
+        setCorrectBool(e, b); // 判断题存布尔，彻底不怕选项顺序/文案变化
         e.wrong = [b === true ? "B" : "A"];
         e.from = "review";
         return e;
       }
       const L = direct.toUpperCase().match(/[AB]/);
       if (L) {
-        e.correct = L[0];
+        setCorrectBool(e, L[0] === "A");
         e.wrong = [L[0] === "A" ? "B" : "A"];
         e.from = "review";
         return e;
@@ -327,7 +471,7 @@ function learn(bank, question, type, myAnswer, mark, options, ratio, correctAnsw
     } else if (type === 0) {
       const L = extractLetters(direct, options);
       if (L.length) {
-        e.correct = L.join("");
+        setCorrect(e, L, options);
         e.wrong = keys.filter((k) => !L.includes(k));
         e.from = "review";
         return e;
@@ -335,8 +479,8 @@ function learn(bank, question, type, myAnswer, mark, options, ratio, correctAnsw
     } else if (type === 1) {
       const L = extractLetters(direct, options);
       if (L.length) {
-        e.correct = L.slice().sort().join("");
-        e.members = L.slice().sort();
+        setCorrect(e, L, options);
+        addMembers(e, L, options);
         e.wrong = keys.filter((k) => !L.includes(k));
         e.from = "review";
         return e;
@@ -356,12 +500,12 @@ function learn(bank, question, type, myAnswer, mark, options, ratio, correctAnsw
     const b = toBool(myAnswer);
     if (b == null) return e;
     if (r >= 0.999) {
-      e.correct = b === true ? "A" : "B";
+      setCorrectBool(e, b === true);
       e.wrong = [b === true ? "B" : "A"];
     } else {
       // 学到的正确判断：与本次相反
       const rightLetter = keys.find((k) => k !== letters[0]);
-      if (rightLetter) e.correct = rightLetter;
+      if (rightLetter) setCorrectBool(e, rightLetter === "A");
       if (letters[0]) e.wrong = [letters[0]];
     }
     return e;
@@ -370,12 +514,12 @@ function learn(bank, question, type, myAnswer, mark, options, ratio, correctAnsw
   if (type === 0) {
     // 单选：答对即锁定；答错则本次选项被排除
     if (r >= 0.999) {
-      e.correct = letters.join("");
+      setCorrect(e, letters, options);
       e.wrong = keys.filter((k) => !letters.includes(k));
     } else if (letters.length === 1) {
       if (!e.wrong.includes(letters[0])) e.wrong.push(letters[0]);
       const remain = keys.filter((k) => !e.wrong.includes(k));
-      if (remain.length === 1) e.correct = remain[0];
+      if (remain.length === 1) setCorrect(e, [remain[0]], options);
     }
     return e;
   }
@@ -383,21 +527,25 @@ function learn(bank, question, type, myAnswer, mark, options, ratio, correctAnsw
   if (type === 1) {
     // 多选：满分 = 本次集合就是正确集合；半对 = 本次所选的每个选项都属于正确答案
     if (r >= 0.999) {
-      e.correct = letters.join("");
-      e.members = letters.slice();
+      setCorrect(e, letters, options);
+      addMembers(e, letters, options);
     } else if (r > 0) {
-      for (const L of letters) if (!e.members.includes(L)) e.members.push(L);
-      e.members.sort();
+      addMembers(e, letters, options);
       // 已确认成员数 = 正确选项总数（半对说明"漏选"，且 chaoxing 规则下漏选不加错选）
       if (e.members.length === 1 && letters.length === 1) {
         // 只确认了一个成员，另一个未知：继续留着
         e.correct = null;
+        delete e.correctText;
       }
     } else {
       // 0 分：至少有一个选错；只选了一个时可直接判定该选项错误
       if (letters.length === 1) {
         if (!e.wrong.includes(letters[0])) e.wrong.push(letters[0]);
         e.members = e.members.filter((m) => m !== letters[0]);
+        if (e.memberText) {
+          const bad = lettersToText(letters, options).map(normalize);
+          e.memberText = e.memberText.filter((t) => !bad.includes(normalize(t)));
+        }
       }
     }
     return e;
@@ -418,38 +566,68 @@ function solve(bank, q) {
   const type = Number(q.type);
   const options = q.options || {};
   const keys = Object.keys(options).sort();
-  // 顺手补存选项：老题库里大量记录只有题干没有选项，模型没选项就只能瞎猜
+  const entry = findEntryEx(bank, q.title);
+  const e = entry.entry;
+  // 相似度兜底命中的题不能当成"已确认"，压分器也会跟着变保守
+  const fuzzy = entry.fuzzy;
+  // 只有真正没命中任何条目时才登记新题。
+  // 不能无条件调 rememberOptions：模糊命中时它会给新题干另建一个空条目，
+  // 下次同一道题就精确命中那个空条目、把刚学到的答案丢掉。
   try {
-    if (keys.length) rememberOptions(bank, q.title, options);
-  } catch (e) {}
-  const entry = findEntry(bank, q.title);
+    if (keys.length && !e) rememberOptions(bank, q.title, options);
+  } catch (err) {}
 
-  if (entry) {
-    // ① 已确认正确
-    if (entry.correct) {
-      const letters = extractLetters(entry.correct, options);
+  if (e) {
+    // ① 已确认正确：优先用存下来的选项文本反查本次字母（防选项乱序）
+    if (type === 3) {
+      // 判断题：布尔最可靠，和选项顺序、文案都无关
+      if (e.correctBool != null) {
+        return { answer: judgeAnswerToLetter(e.correctBool, options), from: "bank-bool", confidence: fuzzy ? 0.9 : 1 };
+      }
+    }
+    if (e.correctText && e.correctText.length) {
+      const letters = resolveByText(e.correctText, options);
       if (letters.length) {
-        return { answer: letters.join(""), from: "bank", confidence: 1 };
+        return {
+          answer: letters.join(""),
+          from: fuzzy ? "bank-fuzzy" : "bank",
+          confidence: fuzzy ? 0.75 : 1,
+        };
+      }
+      // 文本没对上（选项被改写了）：不要退回字母，字母此时很可能是错的
+    }
+    if (e.correct) {
+      const letters = extractLetters(e.correct, options);
+      if (letters.length) {
+        // 有正确答案但没存选项文本 / 文本对不上：无法校验顺序，降级使用
+        const risky = !e.correctText;
+        return {
+          answer: letters.join(""),
+          from: risky ? "bank-letter" : "bank",
+          confidence: risky ? 0.65 : (fuzzy ? 0.75 : 1),
+        };
       }
     }
     // ② 多选：已确认成员 + 剩下靠未知补（保守：只用已确认成员）
-    if (type === 1 && entry.members && entry.members.length) {
-      const m = entry.members.filter((k) => keys.includes(k));
-      if (m.length) return { answer: m.join(""), from: "bank-members", confidence: 0.6 };
+    if (type === 1) {
+      let m = [];
+      if (e.memberText && e.memberText.length) m = resolveByText(e.memberText, options);
+      if (!m.length && e.members && e.members.length) m = e.members.filter((k) => keys.includes(k));
+      if (m.length) return { answer: m.join(""), from: "bank-members", confidence: fuzzy ? 0.55 : 0.6 };
     }
     // ③ 单选/判断：排除法
-    if ((type === 0 || type === 3) && entry.wrong && entry.wrong.length) {
-      const remain = keys.filter((k) => !entry.wrong.includes(k));
+    if ((type === 0 || type === 3) && e.wrong && e.wrong.length) {
+      const remain = keys.filter((k) => !e.wrong.includes(k));
       if (remain.length === 1) return { answer: remain[0], from: "bank-eliminate", confidence: 0.9 };
     }
   }
 
   // ④ 在线答题源（题库接口/大模型）留下的待验证答案：置信度低于已批阅过的题库
-  if (entry && entry.guess) {
-    const letters = extractLetters(entry.guess, options);
-    const ans = letters.length ? letters.join("") : String(entry.guess);
+  if (e && e.guess) {
+    const letters = extractLetters(e.guess, options);
+    const ans = letters.length ? letters.join("") : String(e.guess);
     if (ans) {
-      return { answer: ans, from: "provider", confidence: Number(entry.guessConf) || 0.8 };
+      return { answer: ans, from: "provider", confidence: Number(e.guessConf) || 0.8 };
     }
   }
 
@@ -470,9 +648,13 @@ module.exports = {
   normalize,
   qkey,
   similarity,
+  negMismatch,
+  SAME_QUESTION_THRESHOLD,
   toBool,
   judgeAnswerToLetter,
   extractLetters,
+  lettersToText,
+  resolveByText,
   emptyBank,
   loadBank,
   migrateBank,
@@ -480,6 +662,10 @@ module.exports = {
   entryOf,
   rememberOptions,
   findEntry,
+  findEntryEx,
+  setCorrect,
+  setCorrectBool,
+  addMembers,
   learn,
   solve,
   BANK_FILE,

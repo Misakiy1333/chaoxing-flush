@@ -540,7 +540,11 @@ function group(title) {
     const seen = { remote: 0, llm: 0 };
     const cloudEntries = {};
     const cloudQ = "云端题库里已经有的题";
-    cloudEntries[A.qkey(cloudQ)] = { type: 0, correct: "C", updatedAt: Date.now() };
+    // 真实云端条目在迁移后都会带上 correctText（防选项乱序），这里也照实造
+      cloudEntries[A.qkey(cloudQ)] = {
+        type: 0, correct: "C", correctText: ["丙"],
+        options: { A: "甲", B: "乙", C: "丙" }, updatedAt: Date.now(),
+      };
     const srv = httpLib.createServer((req, res) => {
       let buf = "";
       req.on("data", (c) => (buf += c));
