@@ -35,12 +35,15 @@ class CourseTask {
     });
 
     // 章节测验 / 作业（手机端协议，含正确率区间控制）
+    // 默认关闭：只有明确 workEnabled === true 才创建 workAgent。
+    // 用 !== false 会把「没配过」也当成开，界面上开关显示关闭却仍在后台答题。
     this.workState = WA.loadState();
-    this.workEnabled = this.cfg.workEnabled !== false;
+    this.workEnabled = this.cfg.workEnabled === true;
     this.workAgent = this.workEnabled
       ? this.cfg.workAgent ||
         new WA.WorkAgent(session, {
-          bank: this.quizAgent ? this.quizAgent.bank : undefined,
+          // 优先用调用方传进来的 bank（预热/单测都会传），否则退回 quizAgent 的
+          bank: this.cfg.bank || (this.quizAgent ? this.quizAgent.bank : undefined),
           accuracyMin: this.cfg.accuracyMin,
           accuracyMax: this.cfg.accuracyMax,
           rounds: this.cfg.workRounds,

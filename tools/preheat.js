@@ -32,6 +32,9 @@ class Preheater {
     this.provider = opts.provider;
     this.log = opts.log || (() => {});
     this.dry = !!opts.dry;
+    // force=true 时忽略「已做过」记录，仍然去拉题（已交卷的测验拉不到可答页面，
+    // 但能确认数据源是否正常；平时不需要开）
+    this.force = !!opts.force;
 
     // 节奏参数（毫秒）：每章间隔、每次测验间隔、风控后的冷却
     this.chapterGap = opts.chapterGap == null ? 2500 : opts.chapterGap;
@@ -43,8 +46,8 @@ class Preheater {
     this.stopped = false;
 
     this.stats = {
-      courses: 0, works: 0, worksDone: 0, worksSkipped: 0,
-      questions: 0, fromBank: 0, fromProvider: 0, unknown: 0, errors: 0, risks: 0,
+      courses: 0, works: 0, worksDone: 0, worksSkipped: 0, worksLocked: 0, worksExam: 0,
+      questions: 0, fromBank: 0, fromCloud: 0, fromRemote: 0, fromProvider: 0, unknown: 0, errors: 0, risks: 0,
     };
     this.detail = [];   // 每个测验的覆盖率
   }
@@ -116,7 +119,12 @@ class Preheater {
 
       for (const w of works) {
         if (this.stopped) return;
-        if (WA.isWorkDone(ct.workState, w.workid)) { this.stats.worksSkipped++; continue; }
+        // 考试类绝不碰（和 courseTask.runWorks 保持一致）：一次机会，挂了就是 0 分
+        if (/exam|考试|测试/i.test(String(w.worktype || "") + " " + String(w.title || ""))) {
+          this.stats.worksExam++;
+          continue;
+        }
+        if (!this.force && WA.isWorkDone(ct.workState, w.workid)) { this.stats.worksSkipped++; continue; }
         try {
           await this._oneWork(course, Object.assign({}, w, { knowledgeid: w.knowledgeid || kid }));
         } catch (e) {
@@ -131,21 +139,28 @@ class Preheater {
 
   async _oneWork(course, w) {
     const wa = this.courseTask.workAgent;
+    // 和 courseTask.runWorks 用同一套参数来源：任务点自带 defaults，
+    // 里面有 courseid / clazzId / cpi / ktoken / userid，比从课程对象猜字段可靠。
+    const d = w.defaults || {};
     const ctx = {
-      courseid: course.cid || course.courseId || course.courseid,
-      clazzId: course.cz || course.clazzId,
-      cpi: course.cpi,
-      knowledgeid: w.knowledgeid || "",
+      courseid: d.courseid || course.cid || course.courseId,
+      clazzId: d.clazzId || course.cz || course.clazzId,
+      cpi: d.cpi || course.cpi,
+      knowledgeid: d.knowledgeid || w.knowledgeid || "",
       workid: w.workid,
       jobid: w.jobid,
       enc: w.enc || "",
-      ktoken: course.ktoken || "",
-      userid: this.courseTask.userid || "",
+      ktoken: d.ktoken || course.ktoken || "",
+      userid: d.userid || "",
+      title: w.title || "",
     };
     const r = await wa.fetch(ctx);
     const page = WorkAgent.parsePage(r.html);
     if (page.state !== "editable" || !page.questions || !page.questions.length) {
-      this.stats.worksSkipped++;
+      // 已交卷的测验拉回来是批阅页，没有可答内容 —— 这些题只能靠答题记录反推，
+      // 属于正常跳过，不算错误。单独记一笔，方便用户区分「没题」和「出错」。
+      this.stats.worksLocked++;
+      if (this.log) this.log(`    ⏭ ${w.title || w.workid}: ${page.state === "done" ? "已交卷" : (page.error || "无可答内容")}`);
       return;
     }
     this.stats.works++;
@@ -168,18 +183,16 @@ class Preheater {
         type: Number(q.type), title: q.title, options: q.options || {},
       });
       if (got && got.answer) {
-        this.stats.fromProvider++;
+        // 区分来源：云端题库命中 / 外部题库 / 大模型，用户能看出钱花在哪
+        if (got.from === "cloud-bank") this.stats.fromCloud++;
+        else if (got.from === "remote-bank") this.stats.fromRemote++;
+        else this.stats.fromProvider++;
         hit++;
-        // 写进题库（不覆盖已确认答案）
+        // provider.resolve() 内部已调 _remember() 写好 guess/guessConf，
+        // 这里只补它不管的：选项文本（下次答题时模型才看得到 A/B/C/D）。
         try {
-          const e = A.entryOf(this.courseTask.bank, q.title);
-          if (!e.correct) {
-            e.type = Number(q.type);
-            if (q.options && Object.keys(q.options).length) A.rememberOptions(this.courseTask.bank, q.title, q.options);
-            e.guess = got.answer;
-            e.guessConf = got.confidence || 0.8;
-            e.preheated = true;
-            e.updatedAt = Date.now();
+          if (q.options && Object.keys(q.options).length) {
+            A.rememberOptions(this.courseTask.bank, q.title, q.options);
           }
         } catch (err) {}
       } else {
@@ -204,10 +217,12 @@ class Preheater {
     const lines = [];
     lines.push("========== 预热结果 ==========");
     lines.push(`课程:       ${s.courses}`);
-    lines.push(`可做题测验: ${s.works}（跳过已完成 ${s.worksSkipped}）`);
+    lines.push(`可做题测验: ${s.works}（已交卷 ${s.worksLocked}，已记录 ${s.worksSkipped}，考试跳过 ${s.worksExam}）`);
     lines.push(`题目总数:   ${s.questions}`);
-    lines.push(`题库命中:   ${s.fromBank}`);
-    lines.push(`问答题源:   ${s.fromProvider}`);
+    lines.push(`本地题库:   ${s.fromBank}`);
+    lines.push(`云端题库:   ${s.fromCloud}`);
+    if (s.fromRemote) lines.push(`外部题库:   ${s.fromRemote}`);
+    lines.push(`大模型:     ${s.fromProvider}`);
     lines.push(`仍未知:     ${s.unknown}`);
     if (s.errors) lines.push(`出错:       ${s.errors}`);
     if (s.risks) lines.push(`风控:       ${s.risks} 次${this.stopped ? "（已停止）" : ""}`);
@@ -254,9 +269,18 @@ if (require.main === module) {
     const s = new Session({ cookie: cfg.saveCookie, debug: false, proxy: cfg.proxy || "" });
 
     const bank = A.loadBank();
+
+    // 云端共享题库地址：config 里没填就从 updateUrl 推（和 local-server._bankBase 一致），
+    // 否则云端 2340 条题一条都用不上，全靠大模型花钱。
+    let sharedUrl = String(cfg.sharedBankUrl || "").trim();
+    if (!sharedUrl) {
+      const base = String(cfg.updateUrl || "").replace(/\/+$/, "");
+      if (base) sharedUrl = base;
+    }
+
     const provider = new AP.AnswerProvider({
       bank,
-      shared: cfg.sharedBankUrl ? { enabled: true, url: cfg.sharedBankUrl, key: cfg.sharedBankKey || "shared" } : { enabled: false },
+      shared: sharedUrl ? { enabled: true, url: sharedUrl, key: cfg.sharedBankKey || "shared" } : { enabled: false },
       remote: cfg.answerRemoteUrl ? { enabled: true, url: cfg.answerRemoteUrl, token: cfg.answerRemoteToken || "" } : { enabled: false },
       llm: cfg.llmEnabled && cfg.llmApiKey ? {
         enabled: true, baseUrl: cfg.llmBaseUrl, apiKey: cfg.llmApiKey,
@@ -266,10 +290,29 @@ if (require.main === module) {
 
     // 云端题库（本地版先从云端拉一批，命中率会高很多）
     if (provider.refreshShared) {
-      try { await provider.refreshShared(true); } catch (e) {}
+      try {
+        await provider.refreshShared(true);
+        console.log("云端题库已载入: " + (provider.stats && provider.stats.cloudPulled ? provider.stats.cloudPulled + " 条" : "已连接"));
+      } catch (e) {
+        console.log("云端题库拉取失败（继续用大模型）: " + e.message);
+      }
     }
 
     const ct = new CourseTask(s, Object.assign({}, cfg, { bank, log: () => {} }));
+
+    // 预热只读题、不交卷，所以即使 workEnabled 关着也要一个 workAgent 来 fetch。
+    // CourseTask 现在默认不建（workEnabled 默认 false），这里显式补上。
+    if (!ct.workAgent) {
+      ct.workAgent = new WA.WorkAgent(s, {
+        bank,
+        accuracyMin: cfg.accuracyMin,
+        accuracyMax: cfg.accuracyMax,
+        rounds: cfg.workRounds,
+        log: () => {},
+        provider,
+      });
+    }
+    ct.bank = bank;
     let courses = [];
     try {
       courses = await CourseData.list(s, { courseType: 1 });
@@ -286,6 +329,7 @@ if (require.main === module) {
     const slow = argv.includes("--slow");
     const ph = new Preheater({
       session: s, courseTask: ct, provider, dry, log: console.log,
+      force: argv.includes("--force"),
       chapterGap: fast ? 800 : slow ? 6000 : 2500,
       workGap: fast ? 400 : slow ? 2500 : 1200,
       riskCooldown: fast ? 60000 : slow ? 300000 : 120000,
